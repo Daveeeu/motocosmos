@@ -1,0 +1,60 @@
+# File: /docker-compose.dev.yml
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: motocosmos_db_dev
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: motocosmos
+      MYSQL_USER: motocosmos_user
+      MYSQL_PASSWORD: motocosmos_password
+    ports:
+      - "3310:3306"
+    volumes:
+      - mysql_data_dev:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - motocosmos_network
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: motocosmos_api_dev
+    restart: unless-stopped
+    ports:
+      - "8089:8080"
+    environment:
+      - DATABASE_URL=motocosmos_user:motocosmos_password@tcp(db:3306)/motocosmos?charset=utf8mb4&parseTime=True&loc=Local
+      - JWT_SECRET=your-super-secret-jwt-key
+      - MAPBOX_TOKEN=your-mapbox-token
+      - PORT=8080
+      - GIN_MODE=debug
+    depends_on:
+      - db
+    networks:
+      - motocosmos_network
+    volumes:
+      - .:/app  # Mount the entire project directory
+      - /app/tmp # Exclude tmp directory for air
+      - ./uploads:/app/uploads
+    working_dir: /app
+
+  redis:
+    image: redis:7-alpine
+    container_name: motocosmos_redis_dev
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    networks:
+      - motocosmos_network
+
+volumes:
+  mysql_data_dev:
+
+networks:
+  motocosmos_network:
+    driver: bridge
