@@ -4,152 +4,189 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"motocosmos-api/config"
 	"motocosmos-api/controllers"
 	"motocosmos-api/middleware"
-	"motocosmos-api/services"
 )
 
-func SetupRoutes(r *gin.Engine, db *gorm.DB, cfg *config.Config, emailService *services.EmailService) {
-	// Controllers
-	authController := controllers.NewAuthController(db, cfg.JWTSecret, emailService)
+func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
+	// Initialize controllers
+	authController := controllers.NewAuthController(db, jwtSecret)
 	userController := controllers.NewUserController(db)
-	routeController := controllers.NewRouteController(db)
-	eventController := controllers.NewEventController(db)
 	postController := controllers.NewPostController(db)
-	motorcycleController := controllers.NewMotorcycleController(db)
-	rideController := controllers.NewRideController(db)
-	locationController := controllers.NewLocationController(db)
-	calculatorController := controllers.NewCalculatorController(db)
+	// Add other controllers as needed
 
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-			"status":  "healthy",
-			"email":   "configured",
-		})
-	})
+	// Global middleware
+	router.Use(middleware.SecurityHeaders())
+	router.Use(middleware.ErrorHandler())
+	router.Use(middleware.RequestLogger())
+	router.Use(middleware.RateLimit(100, 10)) // 100 requests per minute, burst of 10
 
-	// API version 1
-	v1 := r.Group("/api/v1")
+	// API v1 group
+	v1 := router.Group("/api/v1")
+	v1.Use(middleware.ValidateJSON())
+	v1.Use(middleware.PaginationDefaults())
 
 	// Auth routes (public)
 	auth := v1.Group("/auth")
 	{
-		auth.POST("/login", authController.Login)
 		auth.POST("/register", authController.Register)
+		auth.POST("/login", authController.Login)
 		auth.POST("/logout", authController.Logout)
-		auth.POST("/send-verification", authController.SendVerification)
+		auth.POST("/send-verification", authController.SendVerificationCode)
 		auth.POST("/verify-code", authController.VerifyCode)
 		auth.POST("/reset-password", authController.ResetPassword)
-
-		auth.GET("/debug/verification-code", authController.GetVerificationCode)
-
 	}
 
-	// Protected routes
+	// Protected routes (require authentication)
 	protected := v1.Group("/")
-	protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	protected.Use(middleware.AuthMiddleware(jwtSecret))
+
+	// User routes
+	users := protected.Group("/users")
 	{
-		// User routes
-		users := protected.Group("/users")
-		{
-			users.GET("/profile", userController.GetProfile)
-			users.PUT("/profile", userController.UpdateProfile)
-			users.GET("/statistics", userController.GetStatistics)
-			users.POST("/follow/:id", userController.FollowUser)
-			users.DELETE("/follow/:id", userController.UnfollowUser)
-			users.GET("/followers", userController.GetFollowers)
-			users.GET("/following", userController.GetFollowing)
+		users.GET("/profile", userController.GetProfile)
+		users.PUT("/profile", userController.UpdateProfile)
+		users.GET("/statistics", userController.GetStatistics)
+		users.POST("/follow/:user_id", userController.FollowUser)
+		users.DELETE("/follow/:user_id", userController.UnfollowUser)
+		users.GET("/followers", userController.GetFollowers)
+		users.GET("/following", userController.GetFollowing)
+
+		// NEW: Enhanced user endpoints
+		users.GET("/following-status/:user_id", userController.GetFollowingStatus) // Check if following a user
+		users.GET("/search", userController.SearchUsers)                           // Search users by name/handle
+		users.GET("/handle/:handle", userController.GetUserByHandle)               // Get user by handle
+	}
+
+	// Post routes
+	posts := protected.Group("/posts")
+	{
+		posts.GET("/", postController.GetPosts)
+		posts.POST("/", postController.CreatePost)
+		posts.GET("/feed", postController.GetFeed)
+		posts.GET("/:id", postController.GetPost)
+		posts.PUT("/:id", postController.UpdatePost)
+		posts.DELETE("/:id", postController.DeletePost)
+		posts.POST("/:id/like", postController.LikePost)
+		posts.DELETE("/:id/unlike", postController.UnlikePost)
+		posts.POST("/:id/share", postController.SharePost)
+
+		// NEW: Enhanced post endpoints
+		posts.GET("/:id/interactions", postController.GetPostInteractions) // Get user interaction states for a post
+		posts.POST("/:id/bookmark", postController.BookmarkPost)           // Bookmark a post
+		posts.DELETE("/:id/bookmark", postController.UnbookmarkPost)       // Remove bookmark
+		posts.GET("/bookmarked", postController.GetBookmarkedPosts)        // Get user's bookmarked posts
+	}
+
+	// Motorcycle routes (if implemented)
+	motorcycles := protected.Group("/motorcycles")
+	{
+		// Add motorcycle endpoints here when implemented
+		_ = motorcycles // Prevent unused variable error
+	}
+
+	// Route routes (if implemented)
+	routes := protected.Group("/routes")
+	{
+		// Add route endpoints here when implemented
+		_ = routes // Prevent unused variable error
+	}
+
+	// Event routes (if implemented)
+	events := protected.Group("/events")
+	{
+		// Add event endpoints here when implemented
+		_ = events // Prevent unused variable error
+	}
+
+	// Ride recording routes (if implemented)
+	rides := protected.Group("/rides")
+	{
+		// Add ride recording endpoints here when implemented
+		_ = rides // Prevent unused variable error
+	}
+
+	// Location routes (if implemented)
+	locations := protected.Group("/locations")
+	{
+		// Add location endpoints here when implemented
+		_ = locations // Prevent unused variable error
+	}
+
+	// Trip calculator routes (if implemented)
+	calculator := protected.Group("/calculator")
+	{
+		// Add calculator endpoints here when implemented
+		_ = calculator // Prevent unused variable error
+	}
+
+	// Health check endpoint (public)
+	v1.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status":  "ok",
+			"message": "MotoCosmos API is running",
+			"version": "1.0.0",
+		})
+	})
+
+	// API documentation endpoint (public)
+	v1.GET("/docs", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "API Documentation",
+			"endpoints": gin.H{
+				"auth": gin.H{
+					"POST /auth/register":          "Register a new user",
+					"POST /auth/login":             "Login user",
+					"POST /auth/logout":            "Logout user",
+					"POST /auth/send-verification": "Send verification code",
+					"POST /auth/verify-code":       "Verify email code",
+					"POST /auth/reset-password":    "Reset password",
+				},
+				"users": gin.H{
+					"GET /users/profile":                   "Get current user profile",
+					"PUT /users/profile":                   "Update user profile",
+					"GET /users/statistics":                "Get user statistics",
+					"POST /users/follow/:user_id":          "Follow a user",
+					"DELETE /users/follow/:user_id":        "Unfollow a user",
+					"GET /users/following-status/:user_id": "Check following status",
+					"GET /users/followers":                 "Get user followers",
+					"GET /users/following":                 "Get users being followed",
+					"GET /users/search":                    "Search users",
+					"GET /users/handle/:handle":            "Get user by handle",
+				},
+				"posts": gin.H{
+					"GET /posts/":                 "Get all posts",
+					"POST /posts/":                "Create a new post",
+					"GET /posts/feed":             "Get personalized feed",
+					"GET /posts/:id":              "Get single post",
+					"PUT /posts/:id":              "Update post",
+					"DELETE /posts/:id":           "Delete post",
+					"POST /posts/:id/like":        "Like a post",
+					"DELETE /posts/:id/unlike":    "Unlike a post",
+					"POST /posts/:id/share":       "Share a post",
+					"GET /posts/:id/interactions": "Get user interactions for post",
+					"POST /posts/:id/bookmark":    "Bookmark a post",
+					"DELETE /posts/:id/bookmark":  "Remove bookmark",
+					"GET /posts/bookmarked":       "Get bookmarked posts",
+				},
+			},
+		})
+	})
+}
+
+// CORS middleware for handling cross-origin requests
+func SetupCORS() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
 		}
 
-		// Motorcycle routes
-		motorcycles := protected.Group("/motorcycles")
-		{
-			motorcycles.GET("/", motorcycleController.GetMotorcycles)
-			motorcycles.POST("/", motorcycleController.CreateMotorcycle)
-			motorcycles.PUT("/:id", motorcycleController.UpdateMotorcycle)
-			motorcycles.DELETE("/:id", motorcycleController.DeleteMotorcycle)
-		}
-
-		// Route routes
-		routes := protected.Group("/routes")
-		{
-			routes.GET("/", routeController.GetRoutes)
-			routes.POST("/", routeController.CreateRoute)
-			routes.GET("/:id", routeController.GetRoute)
-			routes.PUT("/:id", routeController.UpdateRoute)
-			routes.DELETE("/:id", routeController.DeleteRoute)
-			routes.POST("/:id/save", routeController.SaveRoute)
-			routes.GET("/saved", routeController.GetSavedRoutes)
-			routes.GET("/recommendations", routeController.GetRecommendations)
-			routes.POST("/plan", routeController.PlanRoute)
-			routes.POST("/calculate-metrics", routeController.CalculateMetrics)
-		}
-
-		// Community Event routes
-		events := protected.Group("/events")
-		{
-			events.GET("/", eventController.GetEvents)
-			events.POST("/", eventController.CreateEvent)
-			events.GET("/:id", eventController.GetEvent)
-			events.PUT("/:id", eventController.UpdateEvent)
-			events.DELETE("/:id", eventController.DeleteEvent)
-			events.POST("/:id/join", eventController.JoinEvent)
-			events.DELETE("/:id/leave", eventController.LeaveEvent)
-			events.POST("/:id/like", eventController.LikeEvent)
-			events.DELETE("/:id/unlike", eventController.UnlikeEvent)
-			events.GET("/joined", eventController.GetJoinedEvents)
-			events.GET("/created", eventController.GetCreatedEvents)
-			events.GET("/search", eventController.SearchEvents)
-		}
-
-		// Post routes
-		posts := protected.Group("/posts")
-		{
-			posts.GET("/", postController.GetPosts)
-			posts.POST("/", postController.CreatePost)
-			posts.GET("/:id", postController.GetPost)
-			posts.PUT("/:id", postController.UpdatePost)
-			posts.DELETE("/:id", postController.DeletePost)
-			posts.POST("/:id/like", postController.LikePost)
-			posts.DELETE("/:id/unlike", postController.UnlikePost)
-			posts.POST("/:id/share", postController.SharePost)
-			posts.GET("/feed", postController.GetFeed)
-		}
-
-		// Ride Record routes
-		rides := protected.Group("/rides")
-		{
-			rides.GET("/", rideController.GetRides)
-			rides.POST("/start", rideController.StartRide)
-			rides.PUT("/:id/pause", rideController.PauseRide)
-			rides.PUT("/:id/resume", rideController.ResumeRide)
-			rides.PUT("/:id/stop", rideController.StopRide)
-			rides.GET("/:id", rideController.GetRide)
-			rides.POST("/:id/share", rideController.ShareRide)
-			rides.POST("/:id/route-points", rideController.AddRoutePoint)
-		}
-
-		// Location routes
-		locations := protected.Group("/locations")
-		{
-			locations.PUT("/update", locationController.UpdateLocation)
-			locations.GET("/nearby", locationController.GetNearbyUsers)
-			locations.GET("/friends", locationController.GetFriends)
-			locations.POST("/friend/:id", locationController.AddFriend)
-			locations.DELETE("/friend/:id", locationController.RemoveFriend)
-		}
-
-		// Calculator routes
-		calculator := protected.Group("/calculator")
-		{
-			calculator.POST("/calculate", calculatorController.CalculateTrip)
-			calculator.POST("/save", calculatorController.SaveCalculation)
-			calculator.GET("/history", calculatorController.GetHistory)
-			calculator.DELETE("/history", calculatorController.ClearHistory)
-			calculator.GET("/fuel-prices", calculatorController.GetFuelPrices)
-			calculator.GET("/fuel-consumption", calculatorController.GetFuelConsumption)
-		}
+		c.Next()
 	}
 }

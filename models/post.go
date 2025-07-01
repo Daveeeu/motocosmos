@@ -20,8 +20,9 @@ type Post struct {
 	CreatedAt     time.Time   `json:"created_at"`
 	UpdatedAt     time.Time   `json:"updated_at"`
 
-	User  User       `json:"user" gorm:"foreignKey:UserID"`
-	Likes []PostLike `json:"likes" gorm:"foreignKey:PostID"`
+	User      User           `json:"user" gorm:"foreignKey:UserID"`
+	Likes     []PostLike     `json:"likes" gorm:"foreignKey:PostID"`
+	Bookmarks []PostBookmark `json:"bookmarks" gorm:"foreignKey:PostID"`
 }
 
 type PostLike struct {
@@ -32,4 +33,14 @@ type PostLike struct {
 
 	Post Post `json:"post" gorm:"foreignKey:PostID"`
 	User User `json:"user" gorm:"foreignKey:UserID"`
+}
+
+// FeedResponse represents the enhanced feed response with pagination metadata
+type FeedResponse struct {
+	Posts      []PostWithInteractions `json:"posts"`
+	Page       int                    `json:"page"`
+	Limit      int                    `json:"limit"`
+	Total      int64                  `json:"total"`
+	HasMore    bool                   `json:"has_more"`
+	TotalPages int                    `json:"total_pages"`
 }

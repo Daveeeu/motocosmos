@@ -3,21 +3,14 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"log"
 	"motocosmos-api/config"
 	"motocosmos-api/database"
 	"motocosmos-api/routes"
-	"motocosmos-api/services"
 )
 
 func main() {
-	// Load environment variables
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
-	}
-
-	// Initialize configuration
+	// Load configuration
 	cfg := config.Load()
 
 	// Initialize database
@@ -28,36 +21,42 @@ func main() {
 
 	// Run migrations
 	if err := database.Migrate(db); err != nil {
-		log.Fatal("Failed to run migrations:", err)
+		log.Fatal("Failed to migrate database:", err)
 	}
 
-	// Initialize email service
-	emailService := services.NewEmailService(cfg)
+	// Seed database with test data (optional - for development)
+	if err := database.SeedData(db); err != nil {
+		log.Printf("Warning: Failed to seed database: %v", err)
+	}
 
-	// Initialize Gin router
-	r := gin.Default()
+	// Set Gin mode based on environment
+	if cfg.Port == "8080" { // Development
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	// Create router
+	router := gin.Default()
 
 	// Setup CORS middleware
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+	router.Use(routes.SetupCORS())
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
+	// Request logging middleware
+	router.Use(gin.Logger())
 
-		c.Next()
-	})
+	// Recovery middleware
+	router.Use(gin.Recovery())
 
 	// Setup routes
-	routes.SetupRoutes(r, db, cfg, emailService)
+	routes.SetupRoutes(router, db, cfg.JWTSecret)
 
 	// Start server
-	log.Printf("🚀 Server starting on port %s", cfg.Port)
-	log.Printf("📧 Email service configured with SMTP: %s:%d", cfg.SMTPHost, cfg.SMTPPort)
-	if err := r.Run(":" + cfg.Port); err != nil {
+	log.Printf("Starting MotoCosmos API server on port %s", cfg.Port)
+	log.Printf("API Documentation available at: http://localhost:%s/api/v1/docs", cfg.Port)
+	log.Printf("Health check available at: http://localhost:%s/api/v1/health", cfg.Port)
+
+	if err := router.Run(":" + cfg.Port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }

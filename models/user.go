@@ -2,12 +2,14 @@
 package models
 
 import (
+	"strings"
 	"time"
 )
 
 type User struct {
 	ID             string    `json:"id" gorm:"primaryKey;size:191"`
 	Name           string    `json:"name" gorm:"not null;size:255"`
+	Handle         string    `json:"handle" gorm:"uniqueIndex;not null;size:50"` // Added for @username functionality
 	Email          string    `json:"email" gorm:"uniqueIndex;not null;size:255"`
 	Password       string    `json:"-" gorm:"not null;size:255"`
 	EmailVerified  bool      `json:"email_verified" gorm:"default:false"`
@@ -35,4 +37,38 @@ type Follow struct {
 
 	Follower  User `json:"follower" gorm:"foreignKey:FollowerID"`
 	Following User `json:"following" gorm:"foreignKey:FollowingID"`
+}
+
+// PostBookmark represents a bookmarked post by a user
+type PostBookmark struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	PostID    string    `json:"post_id" gorm:"not null;size:191"`
+	UserID    string    `json:"user_id" gorm:"not null;size:191"`
+	CreatedAt time.Time `json:"created_at"`
+
+	Post Post `json:"post" gorm:"foreignKey:PostID"`
+	User User `json:"user" gorm:"foreignKey:UserID"`
+}
+
+// GenerateHandleFromName creates a unique handle from the user's name
+func GenerateHandleFromName(name string) string {
+	// Convert to lowercase and replace spaces with underscores
+	handle := strings.ToLower(strings.ReplaceAll(name, " ", "_"))
+	// Remove special characters
+	handle = strings.ReplaceAll(handle, ".", "")
+	handle = strings.ReplaceAll(handle, "-", "_")
+	return handle
+}
+
+// UserInteractions represents the current user's interactions with posts
+type UserInteractions struct {
+	IsLiked         bool `json:"is_liked"`
+	IsBookmarked    bool `json:"is_bookmarked"`
+	IsUserFollowing bool `json:"is_user_following"`
+}
+
+// PostWithInteractions represents a post with user interaction states
+type PostWithInteractions struct {
+	Post
+	UserInteractions UserInteractions `json:"user_interactions"`
 }

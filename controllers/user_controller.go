@@ -2,10 +2,12 @@
 package controllers
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"motocosmos-api/models"
 	"net/http"
+	"strconv"
 )
 
 type UserController struct {
@@ -33,7 +35,8 @@ func (uc *UserController) UpdateProfile(c *gin.Context) {
 	userID := c.GetString("user_id")
 
 	var req struct {
-		Name   *string `json:"name"`
+		Name   string  `json:"name"`
+		Handle string  `json:"handle"`
 		Avatar *string `json:"avatar"`
 	}
 
@@ -42,15 +45,30 @@ func (uc *UserController) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	updates := map[string]interface{}{}
-	if req.Name != nil {
-		updates["name"] = *req.Name
-	}
-	if req.Avatar != nil {
-		updates["avatar"] = *req.Avatar
+	var user models.User
+	if err := uc.db.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
 	}
 
-	if err := uc.db.Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+	updates := map[string]interface{}{}
+	if req.Name != "" {
+		updates["name"] = req.Name
+	}
+	if req.Handle != "" {
+		// Check if handle is already taken
+		var existingUser models.User
+		if err := uc.db.Where("handle = ? AND id != ?", req.Handle, userID).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "Handle already taken"})
+			return
+		}
+		updates["handle"] = req.Handle
+	}
+	if req.Avatar != nil {
+		updates["avatar"] = req.Avatar
+	}
+
+	if err := uc.db.Model(&user).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
 		return
 	}
@@ -67,41 +85,44 @@ func (uc *UserController) GetStatistics(c *gin.Context) {
 		return
 	}
 
-	// Get ride statistics
-	var ridesCount int64
-	uc.db.Model(&models.RideRecord{}).Where("user_id = ? AND is_completed = ?", userID, true).Count(&ridesCount)
-
-	statistics := gin.H{
+	stats := gin.H{
 		"followers_count": user.FollowersCount,
 		"following_count": user.FollowingCount,
-		"rides_count":     ridesCount,
+		"rides_count":     user.RidesCount,
 		"total_time":      user.TotalTime,
 		"total_distance":  user.TotalDistance,
 	}
 
-	c.JSON(http.StatusOK, statistics)
+	c.JSON(http.StatusOK, stats)
 }
 
 func (uc *UserController) FollowUser(c *gin.Context) {
-	userID := c.GetString("user_id")
-	targetUserID := c.Param("id")
+	followerID := c.GetString("user_id")
+	followingID := c.Param("user_id")
 
-	if userID == targetUserID {
+	if followerID == followingID {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot follow yourself"})
+		return
+	}
+
+	// Check if target user exists
+	var targetUser models.User
+	if err := uc.db.First(&targetUser, "id = ?", followingID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
 	// Check if already following
 	var existingFollow models.Follow
-	if err := uc.db.Where("follower_id = ? AND following_id = ?", userID, targetUserID).First(&existingFollow).Error; err == nil {
+	if err := uc.db.Where("follower_id = ? AND following_id = ?", followerID, followingID).First(&existingFollow).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Already following this user"})
 		return
 	}
 
 	// Create follow relationship
 	follow := models.Follow{
-		FollowerID:  userID,
-		FollowingID: targetUserID,
+		FollowerID:  followerID,
+		FollowingID: followingID,
 	}
 
 	if err := uc.db.Create(&follow).Error; err != nil {
@@ -109,39 +130,87 @@ func (uc *UserController) FollowUser(c *gin.Context) {
 		return
 	}
 
-	// Update counters
-	uc.db.Model(&models.User{}).Where("id = ?", userID).UpdateColumn("following_count", gorm.Expr("following_count + ?", 1))
-	uc.db.Model(&models.User{}).Where("id = ?", targetUserID).UpdateColumn("followers_count", gorm.Expr("followers_count + ?", 1))
+	// Update follower and following counts
+	uc.db.Model(&models.User{}).Where("id = ?", followerID).UpdateColumn("following_count", gorm.Expr("following_count + ?", 1))
+	uc.db.Model(&models.User{}).Where("id = ?", followingID).UpdateColumn("followers_count", gorm.Expr("followers_count + ?", 1))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully followed user"})
 }
 
 func (uc *UserController) UnfollowUser(c *gin.Context) {
-	userID := c.GetString("user_id")
-	targetUserID := c.Param("id")
+	followerID := c.GetString("user_id")
+	followingID := c.Param("user_id")
 
-	if err := uc.db.Where("follower_id = ? AND following_id = ?", userID, targetUserID).Delete(&models.Follow{}).Error; err != nil {
+	var follow models.Follow
+	if err := uc.db.Where("follower_id = ? AND following_id = ?", followerID, followingID).First(&follow).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Follow relationship not found"})
 		return
 	}
 
-	// Update counters
-	uc.db.Model(&models.User{}).Where("id = ?", userID).UpdateColumn("following_count", gorm.Expr("following_count - ?", 1))
-	uc.db.Model(&models.User{}).Where("id = ?", targetUserID).UpdateColumn("followers_count", gorm.Expr("followers_count - ?", 1))
+	if err := uc.db.Delete(&follow).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unfollow user"})
+		return
+	}
+
+	// Update follower and following counts
+	uc.db.Model(&models.User{}).Where("id = ?", followerID).UpdateColumn("following_count", gorm.Expr("following_count - ?", 1))
+	uc.db.Model(&models.User{}).Where("id = ?", followingID).UpdateColumn("followers_count", gorm.Expr("followers_count - ?", 1))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully unfollowed user"})
 }
 
-func (uc *UserController) GetFollowers(c *gin.Context) {
-	userID := c.GetString("user_id")
+// NEW: Check following status
+func (uc *UserController) GetFollowingStatus(c *gin.Context) {
+	followerID := c.GetString("user_id")
+	followingID := c.Param("user_id")
 
-	var follows []models.Follow
-	if err := uc.db.Preload("Follower").Where("following_id = ?", userID).Find(&follows).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get followers"})
+	if followerID == followingID {
+		c.JSON(http.StatusOK, gin.H{
+			"is_following": false,
+			"message":      "Cannot follow yourself",
+		})
 		return
 	}
 
-	var followers []models.User
+	// Check if target user exists
+	var targetUser models.User
+	if err := uc.db.First(&targetUser, "id = ?", followingID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check follow status
+	var follow models.Follow
+	isFollowing := false
+	if err := uc.db.Where("follower_id = ? AND following_id = ?", followerID, followingID).First(&follow).Error; err == nil {
+		isFollowing = true
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"is_following": isFollowing,
+		"user": gin.H{
+			"id":     targetUser.ID,
+			"name":   targetUser.Name,
+			"handle": targetUser.Handle,
+			"avatar": targetUser.Avatar,
+		},
+	})
+}
+
+func (uc *UserController) GetFollowers(c *gin.Context) {
+	userID := c.GetString("user_id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	offset := (page - 1) * limit
+
+	var follows []models.Follow
+	if err := uc.db.Preload("Follower").Where("following_id = ?", userID).
+		Order("created_at DESC").Offset(offset).Limit(limit).Find(&follows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch followers"})
+		return
+	}
+
+	followers := make([]models.User, 0, len(follows))
 	for _, follow := range follows {
 		follow.Follower.Password = ""
 		followers = append(followers, follow.Follower)
@@ -152,18 +221,105 @@ func (uc *UserController) GetFollowers(c *gin.Context) {
 
 func (uc *UserController) GetFollowing(c *gin.Context) {
 	userID := c.GetString("user_id")
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	offset := (page - 1) * limit
 
 	var follows []models.Follow
-	if err := uc.db.Preload("Following").Where("follower_id = ?", userID).Find(&follows).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get following"})
+	if err := uc.db.Preload("Following").Where("follower_id = ?", userID).
+		Order("created_at DESC").Offset(offset).Limit(limit).Find(&follows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch following"})
 		return
 	}
 
-	var following []models.User
+	following := make([]models.User, 0, len(follows))
 	for _, follow := range follows {
 		follow.Following.Password = ""
 		following = append(following, follow.Following)
 	}
 
 	c.JSON(http.StatusOK, following)
+}
+
+// NEW: Search users by name or handle
+func (uc *UserController) SearchUsers(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Search query is required"})
+		return
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	offset := (page - 1) * limit
+
+	var users []models.User
+	searchPattern := "%" + query + "%"
+
+	if err := uc.db.Where("name LIKE ? OR handle LIKE ?", searchPattern, searchPattern).
+		Order("followers_count DESC").Offset(offset).Limit(limit).Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search users"})
+		return
+	}
+
+	// Remove passwords
+	for i := range users {
+		users[i].Password = ""
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users": users,
+		"page":  page,
+		"limit": limit,
+	})
+}
+
+// NEW: Get user by handle
+func (uc *UserController) GetUserByHandle(c *gin.Context) {
+	handle := c.Param("handle")
+	currentUserID := c.GetString("user_id")
+
+	var user models.User
+	if err := uc.db.Preload("Motorcycles").Where("handle = ?", handle).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	user.Password = ""
+
+	// Check if current user is following this user
+	isFollowing := false
+	if currentUserID != user.ID {
+		var follow models.Follow
+		if err := uc.db.Where("follower_id = ? AND following_id = ?", currentUserID, user.ID).First(&follow).Error; err == nil {
+			isFollowing = true
+		}
+	}
+
+	response := gin.H{
+		"user":         user,
+		"is_following": isFollowing,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// Helper function to generate unique handle
+func (uc *UserController) GenerateUniqueHandle(baseName string) string {
+	baseHandle := models.GenerateHandleFromName(baseName)
+	handle := baseHandle
+	counter := 1
+
+	for {
+		var existingUser models.User
+		if err := uc.db.Where("handle = ?", handle).First(&existingUser).Error; err != nil {
+			// Handle is available
+			break
+		}
+		// Handle exists, try with number suffix
+		handle = fmt.Sprintf("%s_%d", baseHandle, counter)
+		counter++
+	}
+
+	return handle
 }
