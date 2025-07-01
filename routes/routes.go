@@ -7,11 +7,12 @@ import (
 	"motocosmos-api/config"
 	"motocosmos-api/controllers"
 	"motocosmos-api/middleware"
+	"motocosmos-api/services"
 )
 
-func SetupRoutes(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
+func SetupRoutes(r *gin.Engine, db *gorm.DB, cfg *config.Config, emailService *services.EmailService) {
 	// Controllers
-	authController := controllers.NewAuthController(db, cfg.JWTSecret)
+	authController := controllers.NewAuthController(db, cfg.JWTSecret, emailService)
 	userController := controllers.NewUserController(db)
 	routeController := controllers.NewRouteController(db)
 	eventController := controllers.NewEventController(db)

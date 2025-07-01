@@ -10,6 +10,7 @@ type User struct {
 	Name           string    `json:"name" gorm:"not null;size:255"`
 	Email          string    `json:"email" gorm:"uniqueIndex;not null;size:255"`
 	Password       string    `json:"-" gorm:"not null;size:255"`
+	EmailVerified  bool      `json:"email_verified" gorm:"default:false"`
 	Avatar         *string   `json:"avatar" gorm:"size:500"`
 	FollowersCount int       `json:"followers_count" gorm:"default:0"`
 	FollowingCount int       `json:"following_count" gorm:"default:0"`

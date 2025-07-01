@@ -57,6 +57,15 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 
+	// Check if email is verified
+	if !user.EmailVerified {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Email not verified. Please verify your email address first.",
+			"code":  "EMAIL_NOT_VERIFIED",
+		})
+		return
+	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -78,7 +87,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 func (ac *AuthController) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "teszt": req})
 		return
 	}
 
@@ -96,12 +105,13 @@ func (ac *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	// Create user
+	// Create user with email verification set to false
 	user := models.User{
-		ID:       uuid.New().String(),
-		Name:     req.Name,
-		Email:    req.Email,
-		Password: string(hashedPassword),
+		ID:            uuid.New().String(),
+		Name:          req.Name,
+		Email:         req.Email,
+		Password:      string(hashedPassword),
+		EmailVerified: false, // Email not verified yet
 	}
 
 	if err := ac.db.Create(&user).Error; err != nil {
@@ -112,15 +122,10 @@ func (ac *AuthController) Register(c *gin.Context) {
 	// Send verification email
 	code, err := ac.emailService.SendVerificationEmail(user.Email, user.Name)
 	if err != nil {
-		// Log error but don't fail registration
-		println("⚠️ Failed to send verification email:", err.Error())
-
-		// Return success but indicate email issue
-		c.JSON(http.StatusCreated, gin.H{
-			"message":               "User registered successfully. Verification email could not be sent.",
-			"user_id":               user.ID,
-			"email":                 user.Email,
-			"verification_required": true,
+		// If email fails, delete the created user to maintain consistency
+		ac.db.Delete(&user)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to send verification email. Please try again.",
 		})
 		return
 	}
@@ -155,6 +160,12 @@ func (ac *AuthController) SendVerification(c *gin.Context) {
 		return
 	}
 
+	// Check if already verified
+	if user.EmailVerified {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
+		return
+	}
+
 	// Send verification email
 	code, err := ac.emailService.SendVerificationEmail(user.Email, user.Name)
 	if err != nil {
@@ -186,10 +197,17 @@ func (ac *AuthController) VerifyCode(c *gin.Context) {
 		return
 	}
 
-	// Get user and generate token
+	// Get user and update verification status
 	var user models.User
 	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Update email verification status
+	user.EmailVerified = true
+	if err := ac.db.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update verification status"})
 		return
 	}
 
