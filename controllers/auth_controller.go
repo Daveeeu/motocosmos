@@ -10,19 +10,22 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"motocosmos-api/models"
+	"motocosmos-api/services"
 	"net/http"
 	"time"
 )
 
 type AuthController struct {
-	db        *gorm.DB
-	jwtSecret string
+	db           *gorm.DB
+	jwtSecret    string
+	emailService *services.EmailService
 }
 
-func NewAuthController(db *gorm.DB, jwtSecret string) *AuthController {
+func NewAuthController(db *gorm.DB, jwtSecret string, emailService *services.EmailService) *AuthController {
 	return &AuthController{
-		db:        db,
-		jwtSecret: jwtSecret,
+		db:           db,
+		jwtSecret:    jwtSecret,
+		emailService: emailService,
 	}
 }
 
@@ -41,6 +44,11 @@ type LoginRequest struct {
 type AuthResponse struct {
 	Token string      `json:"token"`
 	User  models.User `json:"user"`
+}
+
+type RegisterResponse struct {
+	Message string      `json:"message"`
+	User    models.User `json:"user"`
 }
 
 func (ac *AuthController) Register(c *gin.Context) {
@@ -76,13 +84,14 @@ func (ac *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	// Create user
+	// Create user with EmailVerified = false
 	user := models.User{
-		ID:       uuid.New().String(),
-		Name:     req.Name,
-		Handle:   handle,
-		Email:    req.Email,
-		Password: string(hashedPassword),
+		ID:            uuid.New().String(),
+		Name:          req.Name,
+		Handle:        handle,
+		Email:         req.Email,
+		Password:      string(hashedPassword),
+		EmailVerified: false, // Explicitly set to false
 	}
 
 	if err := ac.db.Create(&user).Error; err != nil {
@@ -90,26 +99,28 @@ func (ac *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	// Generate JWT token
-	token, err := ac.generateJWT(user.ID, user.Email)
+	// Send verification email
+	_, err = ac.emailService.SendVerificationEmail(user.Email, user.Name)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		// Log error but don't fail registration
+		fmt.Printf("Failed to send verification email: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
 		return
 	}
 
 	// Remove password from response
 	user.Password = ""
 
-	c.JSON(http.StatusCreated, AuthResponse{
-		Token: token,
-		User:  user,
+	c.JSON(http.StatusCreated, RegisterResponse{
+		Message: "Registration successful! Please check your email and enter the verification code to complete your account setup.",
+		User:    user,
 	})
 }
 
 func (ac *AuthController) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"erroasdr": err.Error()})
 		return
 	}
 
@@ -123,6 +134,15 @@ func (ac *AuthController) Login(c *gin.Context) {
 	// Check password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	// Check if email is verified
+	if !user.EmailVerified {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "Email not verified",
+			"message": "Please verify your email before logging in. Check your email for the verification code.",
+		})
 		return
 	}
 
@@ -159,18 +179,37 @@ func (ac *AuthController) SendVerificationCode(c *gin.Context) {
 		return
 	}
 
-	// Generate random 4-digit code
-	code := ac.generateVerificationCode()
+	// Check if user exists
+	var user models.User
+	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
 
-	// In a real application, you would:
-	// 1. Store the code in database with expiration
-	// 2. Send the code via email/SMS
-	// For this demo, we'll just return it in the response
+	// Check if already verified
+	if user.EmailVerified {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":           "Verification code sent",
-		"verification_code": code, // Remove this in production
-	})
+	// Send verification email
+	code, err := ac.emailService.SendVerificationEmail(user.Email, user.Name)
+	if err != nil {
+		fmt.Printf("Failed to send verification email: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
+		return
+	}
+
+	// For development/testing purposes, also return the code in response
+	// Remove this in production!
+	response := gin.H{"message": "Verification code sent to your email"}
+
+	// Only include the code in development mode
+	if gin.Mode() == gin.DebugMode {
+		response["debug_code"] = code
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 type VerifyCodeRequest struct {
@@ -185,22 +224,37 @@ func (ac *AuthController) VerifyCode(c *gin.Context) {
 		return
 	}
 
-	// In a real application, you would verify the code from database
-	// For this demo, we'll accept "1234" as valid
-	if req.Code != "1234" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid verification code"})
-		return
-	}
-
-	// Find and update user
+	// Find user
 	var user models.User
 	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
+	// Check if already verified
+	if user.EmailVerified {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
+		return
+	}
+
+	// Verify the code using EmailService
+	if !ac.emailService.VerifyCode(req.Email, req.Code) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired verification code"})
+		return
+	}
+
 	// Mark email as verified
-	ac.db.Model(&user).Update("email_verified", true)
+	if err := ac.db.Model(&user).Update("email_verified", true).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify email"})
+		return
+	}
+
+	// Send welcome email
+	go func() {
+		if err := ac.emailService.SendWelcomeEmail(user.Email, user.Name); err != nil {
+			fmt.Printf("Failed to send welcome email: %v\n", err)
+		}
+	}()
 
 	// Generate JWT token
 	token, err := ac.generateJWT(user.ID, user.Email)
@@ -209,10 +263,59 @@ func (ac *AuthController) VerifyCode(c *gin.Context) {
 		return
 	}
 
+	// Remove password from response
+	user.Password = ""
+	user.EmailVerified = true // Update the user object for response
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Code verified successfully",
+		"message": "Email verified successfully",
 		"token":   token,
+		"user":    user,
 	})
+}
+
+type ResendVerificationRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+// New endpoint to resend verification code
+func (ac *AuthController) ResendVerificationCode(c *gin.Context) {
+	var req ResendVerificationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Find user
+	var user models.User
+	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check if already verified
+	if user.EmailVerified {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
+		return
+	}
+
+	// Send verification email
+	code, err := ac.emailService.SendVerificationEmail(user.Email, user.Name)
+	if err != nil {
+		fmt.Printf("Failed to resend verification email: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
+		return
+	}
+
+	// For development/testing purposes, also return the code in response
+	response := gin.H{"message": "Verification code resent to your email"}
+
+	// Only include the code in development mode
+	if gin.Mode() == gin.DebugMode {
+		response["debug_code"] = code
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 type ResetPasswordRequest struct {

@@ -4,13 +4,18 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"motocosmos-api/config"
 	"motocosmos-api/controllers"
 	"motocosmos-api/middleware"
+	"motocosmos-api/services"
 )
 
 func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
+	cfg := config.Load()
+	emailService := services.NewEmailService(cfg)
+
 	// Initialize controllers
-	authController := controllers.NewAuthController(db, jwtSecret)
+	authController := controllers.NewAuthController(db, jwtSecret, emailService)
 	userController := controllers.NewUserController(db)
 	postController := controllers.NewPostController(db)
 	// Add other controllers as needed

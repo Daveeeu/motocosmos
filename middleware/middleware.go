@@ -147,10 +147,10 @@ func ValidateJSON() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH" {
 			contentType := c.GetHeader("Content-Type")
-			if contentType != "application/json" {
+			if contentType != "application/json; charset=utf-8" {
 				c.JSON(http.StatusBadRequest, ErrorResponse{
 					Error:   "Invalid content type",
-					Message: "Content-Type must be application/json",
+					Message: "Content-Type must be application/json; charset=utf-8" + contentType,
 					Code:    http.StatusBadRequest,
 				})
 				c.Abort()

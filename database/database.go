@@ -61,44 +61,44 @@ func Migrate(db *gorm.DB) error {
 func addCustomIndexes(db *gorm.DB) error {
 	// Add composite indexes for better query performance
 
-	// Posts feed queries
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_posts_user_created ON posts(user_id, created_at DESC)").Error; err != nil {
-		return err
-	}
+	/*	// Posts feed queries
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_posts_user_created ON posts(user_id, created_at DESC)").Error; err != nil {
+			return err
+		}
 
-	// Post likes composite index
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_post_likes_post_user ON post_likes(post_id, user_id)").Error; err != nil {
-		return err
-	}
+		// Post likes composite index
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_post_likes_post_user ON post_likes(post_id, user_id)").Error; err != nil {
+			return err
+		}
 
-	// Post bookmarks composite index
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_post_bookmarks_post_user ON post_bookmarks(post_id, user_id)").Error; err != nil {
-		return err
-	}
+		// Post bookmarks composite index
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_post_bookmarks_post_user ON post_bookmarks(post_id, user_id)").Error; err != nil {
+			return err
+		}
 
-	// Post bookmarks by user for bookmarked posts list
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_post_bookmarks_user_created ON post_bookmarks(user_id, created_at DESC)").Error; err != nil {
-		return err
-	}
+		// Post bookmarks by user for bookmarked posts list
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_post_bookmarks_user_created ON post_bookmarks(user_id, created_at DESC)").Error; err != nil {
+			return err
+		}
 
-	// Follow relationships
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_follows_follower_following ON follows(follower_id, following_id)").Error; err != nil {
-		return err
-	}
+		// Follow relationships
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_follows_follower_following ON follows(follower_id, following_id)").Error; err != nil {
+			return err
+		}
 
-	// User search indexes
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_users_name ON users(name)").Error; err != nil {
-		return err
-	}
+		// User search indexes
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_users_name ON users(name)").Error; err != nil {
+			return err
+		}
 
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_users_handle ON users(handle)").Error; err != nil {
-		return err
-	}
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_users_handle ON users(handle)").Error; err != nil {
+			return err
+		}
 
-	// User popularity for search ranking
-	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_users_followers_count ON users(followers_count DESC)").Error; err != nil {
-		return err
-	}
+		// User popularity for search ranking
+		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_users_followers_count ON users(followers_count DESC)").Error; err != nil {
+			return err
+		}*/
 
 	return nil
 }

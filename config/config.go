@@ -22,8 +22,8 @@ type Config struct {
 }
 
 func Load() *Config {
-	smtpPort, _ := strconv.Atoi(getEnv("SMTP_PORT", "587"))
-
+	smtpPort, _ := strconv.Atoi(getEnv("SMTP_PORT", "2525"))
+	// Looking to send emails in production? Check out our Email API/SMTP product!
 	return &Config{
 		Port:        getEnv("PORT", "8080"),
 		DatabaseURL: getEnv("DATABASE_URL", "user:password@tcp(localhost:3306)/motocosmos?charset=utf8mb4&parseTime=True&loc=Local"),
@@ -31,10 +31,10 @@ func Load() *Config {
 		MapboxToken: getEnv("MAPBOX_TOKEN", "your-mapbox-token"),
 
 		// Email settings
-		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPHost:     getEnv("SMTP_HOST", "sandbox.smtp.mailtrap.io"),
 		SMTPPort:     smtpPort,
-		SMTPUsername: getEnv("SMTP_USERNAME", ""),
-		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPUsername: getEnv("SMTP_USERNAME", "42e3731f7fdc7f"),
+		SMTPPassword: getEnv("SMTP_PASSWORD", "7b2249398b02a0"),
 		FromEmail:    getEnv("FROM_EMAIL", "noreply@motocosmos.com"),
 		FromName:     getEnv("FROM_NAME", "MotoCosmos"),
 	}

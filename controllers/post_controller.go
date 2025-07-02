@@ -352,21 +352,18 @@ func (pc *PostController) GetFeed(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	offset := (page - 1) * limit
 
-	// Get total count for feed
+	// Get total count for all posts
 	var total int64
-	pc.db.Model(&models.Post{}).Where(`
-        user_id = ? OR user_id IN (
-            SELECT following_id FROM follows WHERE follower_id = ?
-        )
-    `, userID, userID).Count(&total)
+	pc.db.Model(&models.Post{}).Count(&total)
 
-	// Get posts from followed users and own posts
+	// Get all posts, but prioritize followed users' posts and own posts
 	var posts []models.Post
-	if err := pc.db.Preload("User").Where(`
-        user_id = ? OR user_id IN (
-            SELECT following_id FROM follows WHERE follower_id = ?
-        )
-    `, userID, userID).Order("created_at DESC").Offset(offset).Limit(limit).Find(&posts).Error; err != nil {
+	if err := pc.db.Preload("User").
+		Select("posts.*, CASE WHEN (posts.user_id = ? OR posts.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)) THEN 0 ELSE 1 END as priority", userID, userID).
+		Order("priority ASC, posts.created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch feed"})
 		return
 	}
