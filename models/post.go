@@ -23,6 +23,7 @@ type Post struct {
 	User      User           `json:"user" gorm:"foreignKey:UserID"`
 	Likes     []PostLike     `json:"likes" gorm:"foreignKey:PostID"`
 	Bookmarks []PostBookmark `json:"bookmarks" gorm:"foreignKey:PostID"`
+	Comments  []Comment      `json:"comments" gorm:"foreignKey:PostID"`
 }
 
 type PostLike struct {

@@ -19,6 +19,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 	authController := controllers.NewAuthController(db, jwtSecret, emailService)
 	userController := controllers.NewUserController(db, notificationController)
 	postController := controllers.NewPostController(db, notificationController)
+	commentController := controllers.NewCommentController(db, notificationController)
+
 	// Add other controllers as needed
 
 	// Global middleware
@@ -86,6 +88,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		posts.POST("/:id/like", postController.LikePost)
 		posts.DELETE("/:id/unlike", postController.UnlikePost)
 		posts.POST("/:id/share", postController.SharePost)
+		posts.POST("/:id/comments", commentController.CreateComment)
+		posts.GET("/:id/comments", commentController.GetComments)
 
 		// Enhanced post endpoints
 		posts.GET("/:id/interactions", postController.GetPostInteractions) // Get user interaction states for a post

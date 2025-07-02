@@ -40,6 +40,7 @@ func Migrate(db *gorm.DB) error {
 		&models.SavedRoute{},
 		&models.TripCalculation{},
 		&models.Notification{},
+		&models.Comment{},
 	)
 
 	if err != nil {
