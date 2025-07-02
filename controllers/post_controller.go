@@ -12,11 +12,15 @@ import (
 )
 
 type PostController struct {
-	db *gorm.DB
+	db                     *gorm.DB
+	notificationController *NotificationController
 }
 
-func NewPostController(db *gorm.DB) *PostController {
-	return &PostController{db: db}
+func NewPostController(db *gorm.DB, notificationController *NotificationController) *PostController {
+	return &PostController{
+		db:                     db,
+		notificationController: notificationController,
+	}
 }
 
 type CreatePostRequest struct {
@@ -211,6 +215,12 @@ func (pc *PostController) LikePost(c *gin.Context) {
 	// Update likes count
 	pc.db.Model(&post).UpdateColumn("likes_count", gorm.Expr("likes_count + ?", 1))
 
+	// Create notification for post like
+	if err := pc.notificationController.CreateLikeNotification(userID, post.UserID, postID); err != nil {
+		// Log error but don't fail the request
+		// You might want to add proper logging here
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Post liked successfully"})
 }
 
@@ -236,6 +246,7 @@ func (pc *PostController) UnlikePost(c *gin.Context) {
 }
 
 func (pc *PostController) SharePost(c *gin.Context) {
+	userID := c.GetString("user_id")
 	postID := c.Param("id")
 
 	var post models.Post
@@ -247,10 +258,16 @@ func (pc *PostController) SharePost(c *gin.Context) {
 	// Update shares count
 	pc.db.Model(&post).UpdateColumn("shares_count", gorm.Expr("shares_count + ?", 1))
 
+	// Create notification for post share
+	if err := pc.notificationController.CreateShareNotification(userID, post.UserID, postID); err != nil {
+		// Log error but don't fail the request
+		// You might want to add proper logging here
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Post shared successfully"})
 }
 
-// NEW: Bookmark endpoints
+// Bookmark endpoints - no notifications needed as these are private actions
 func (pc *PostController) BookmarkPost(c *gin.Context) {
 	userID := c.GetString("user_id")
 	postID := c.Param("id")
@@ -301,7 +318,6 @@ func (pc *PostController) UnbookmarkPost(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Bookmark removed successfully"})
 }
 
-// NEW: Get user's bookmarked posts
 func (pc *PostController) GetBookmarkedPosts(c *gin.Context) {
 	userID := c.GetString("user_id")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -395,7 +411,6 @@ func (pc *PostController) GetFeed(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// NEW: Get user interaction states for a post
 func (pc *PostController) GetPostInteractions(c *gin.Context) {
 	userID := c.GetString("user_id")
 	postID := c.Param("id")

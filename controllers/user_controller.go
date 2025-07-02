@@ -11,11 +11,15 @@ import (
 )
 
 type UserController struct {
-	db *gorm.DB
+	db                     *gorm.DB
+	notificationController *NotificationController
 }
 
-func NewUserController(db *gorm.DB) *UserController {
-	return &UserController{db: db}
+func NewUserController(db *gorm.DB, notificationController *NotificationController) *UserController {
+	return &UserController{
+		db:                     db,
+		notificationController: notificationController,
+	}
 }
 
 func (uc *UserController) GetProfile(c *gin.Context) {
@@ -134,6 +138,13 @@ func (uc *UserController) FollowUser(c *gin.Context) {
 	uc.db.Model(&models.User{}).Where("id = ?", followerID).UpdateColumn("following_count", gorm.Expr("following_count + ?", 1))
 	uc.db.Model(&models.User{}).Where("id = ?", followingID).UpdateColumn("followers_count", gorm.Expr("followers_count + ?", 1))
 
+	// Create notification for follow
+	if err := uc.notificationController.CreateFollowNotification(followerID, followingID); err != nil {
+		// Log error but don't fail the request
+		// You might want to add proper logging here
+		fmt.Printf("Failed to create follow notification: %v\n", err)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully followed user"})
 }
 
@@ -159,7 +170,7 @@ func (uc *UserController) UnfollowUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully unfollowed user"})
 }
 
-// NEW: Check following status
+// Check following status
 func (uc *UserController) GetFollowingStatus(c *gin.Context) {
 	followerID := c.GetString("user_id")
 	followingID := c.Param("user_id")
@@ -241,7 +252,7 @@ func (uc *UserController) GetFollowing(c *gin.Context) {
 	c.JSON(http.StatusOK, following)
 }
 
-// NEW: Search users by name or handle
+// Search users by name or handle
 func (uc *UserController) SearchUsers(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
@@ -274,7 +285,7 @@ func (uc *UserController) SearchUsers(c *gin.Context) {
 	})
 }
 
-// NEW: Get user by handle
+// Get user by handle
 func (uc *UserController) GetUserByHandle(c *gin.Context) {
 	handle := c.Param("handle")
 	currentUserID := c.GetString("user_id")

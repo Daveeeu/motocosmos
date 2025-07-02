@@ -14,10 +14,11 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 	cfg := config.Load()
 	emailService := services.NewEmailService(cfg)
 
-	// Initialize controllers
+	// Initialize controllers in proper order - NotificationController first
+	notificationController := controllers.NewNotificationController(db)
 	authController := controllers.NewAuthController(db, jwtSecret, emailService)
-	userController := controllers.NewUserController(db)
-	postController := controllers.NewPostController(db)
+	userController := controllers.NewUserController(db, notificationController)
+	postController := controllers.NewPostController(db, notificationController)
 	// Add other controllers as needed
 
 	// Global middleware
@@ -57,10 +58,20 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		users.GET("/followers", userController.GetFollowers)
 		users.GET("/following", userController.GetFollowing)
 
-		// NEW: Enhanced user endpoints
+		// Enhanced user endpoints
 		users.GET("/following-status/:user_id", userController.GetFollowingStatus) // Check if following a user
 		users.GET("/search", userController.SearchUsers)                           // Search users by name/handle
 		users.GET("/handle/:handle", userController.GetUserByHandle)               // Get user by handle
+	}
+
+	// Notification routes
+	notifications := protected.Group("/notifications")
+	{
+		notifications.GET("/", notificationController.GetNotifications)
+		notifications.GET("/stats", notificationController.GetNotificationStats)
+		notifications.PUT("/:id/read", notificationController.MarkAsRead)
+		notifications.PUT("/read-all", notificationController.MarkAllAsRead)
+		notifications.DELETE("/:id", notificationController.DeleteNotification)
 	}
 
 	// Post routes
@@ -76,7 +87,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		posts.DELETE("/:id/unlike", postController.UnlikePost)
 		posts.POST("/:id/share", postController.SharePost)
 
-		// NEW: Enhanced post endpoints
+		// Enhanced post endpoints
 		posts.GET("/:id/interactions", postController.GetPostInteractions) // Get user interaction states for a post
 		posts.POST("/:id/bookmark", postController.BookmarkPost)           // Bookmark a post
 		posts.DELETE("/:id/bookmark", postController.UnbookmarkPost)       // Remove bookmark
@@ -158,6 +169,13 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 					"GET /users/following":                 "Get users being followed",
 					"GET /users/search":                    "Search users",
 					"GET /users/handle/:handle":            "Get user by handle",
+				},
+				"notifications": gin.H{
+					"GET /notifications/":         "Get paginated notifications",
+					"GET /notifications/stats":    "Get notification statistics",
+					"PUT /notifications/:id/read": "Mark notification as read",
+					"PUT /notifications/read-all": "Mark all notifications as read",
+					"DELETE /notifications/:id":   "Delete notification",
 				},
 				"posts": gin.H{
 					"GET /posts/":                 "Get all posts",

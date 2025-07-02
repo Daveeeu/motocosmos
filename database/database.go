@@ -39,6 +39,7 @@ func Migrate(db *gorm.DB) error {
 		&models.UserLocation{},
 		&models.SavedRoute{},
 		&models.TripCalculation{},
+		&models.Notification{},
 	)
 
 	if err != nil {
