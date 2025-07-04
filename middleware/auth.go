@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 )
 
 func AuthMiddleware(secretKey string) gin.HandlerFunc {
+	fmt.Println("Ez egy log üzenet a konzolra.")
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {

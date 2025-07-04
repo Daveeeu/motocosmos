@@ -2,8 +2,11 @@
 package main
 
 import (
-	"github.com/gin-gonic/gin"
+	"fmt"
 	"log"
+	"os"
+
+	"github.com/gin-gonic/gin"
 	"motocosmos-api/config"
 	"motocosmos-api/database"
 	"motocosmos-api/routes"
@@ -16,47 +19,52 @@ func main() {
 	// Initialize database
 	db, err := database.Initialize(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal("Failed to connect to database:", err)
+		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Run migrations
-	if err := database.Migrate(db); err != nil {
-		log.Fatal("Failed to migrate database:", err)
+	// Handle command line arguments
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "migrate":
+			fmt.Println("Running database migrations...")
+			if err := database.Migrate(db); err != nil {
+				log.Fatalf("Migration failed: %v", err)
+			}
+			fmt.Println("Migrations completed successfully!")
+			return
+		case "seed":
+			fmt.Println("Seeding database with test data...")
+			if err := database.SeedData(db); err != nil {
+				log.Fatalf("Seeding failed: %v", err)
+			}
+			fmt.Println("Database seeded successfully!")
+			return
+		}
 	}
 
-	// Seed database with test data (optional - for development)
-	if err := database.SeedData(db); err != nil {
-		log.Printf("Warning: Failed to seed database: %v", err)
+	// Auto-migrate database (for development)
+	if gin.Mode() == gin.DebugMode {
+		fmt.Println("Running auto-migration in debug mode...")
+		if err := database.Migrate(db); err != nil {
+			log.Fatalf("Auto-migration failed: %v", err)
+		}
 	}
 
-	// Set Gin mode based on environment
-	if cfg.Port == "8080" { // Development
-		gin.SetMode(gin.DebugMode)
-	} else {
-		gin.SetMode(gin.ReleaseMode)
-	}
-
-	// Create router
+	// Initialize Gin router
 	router := gin.Default()
 
-	// Setup CORS middleware
+	// Setup CORS
 	router.Use(routes.SetupCORS())
-
-	// Request logging middleware
-	router.Use(gin.Logger())
-
-	// Recovery middleware
-	router.Use(gin.Recovery())
 
 	// Setup routes
 	routes.SetupRoutes(router, db, cfg.JWTSecret)
 
 	// Start server
-	log.Printf("Starting MotoCosmos API server on port %s", cfg.Port)
-	log.Printf("API Documentation available at: http://localhost:%s/api/v1/docs", cfg.Port)
-	log.Printf("Health check available at: http://localhost:%s/api/v1/health", cfg.Port)
+	fmt.Printf("🚀 MotoCosmos API Server starting on port %s\n", cfg.Port)
+	fmt.Printf("📚 API Documentation: http://localhost:%s/api/v1/docs\n", cfg.Port)
+	fmt.Printf("💚 Health Check: http://localhost:%s/api/v1/health\n", cfg.Port)
 
 	if err := router.Run(":" + cfg.Port); err != nil {
-		log.Fatal("Failed to start server:", err)
+		log.Fatalf("Failed to start server: %v", err)
 	}
 }

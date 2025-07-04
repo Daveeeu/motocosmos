@@ -20,6 +20,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 	userController := controllers.NewUserController(db, notificationController)
 	postController := controllers.NewPostController(db, notificationController)
 	commentController := controllers.NewCommentController(db, notificationController)
+	sharedRouteController := controllers.NewSharedRouteController(db, notificationController) // NEW
 
 	// Add other controllers as needed
 
@@ -98,6 +99,30 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		posts.GET("/bookmarked", postController.GetBookmarkedPosts)        // Get user's bookmarked posts
 	}
 
+	// NEW: Shared Routes - Public exploration of community routes
+	sharedRoutes := protected.Group("/shared-routes")
+	{
+		// Core CRUD operations
+		sharedRoutes.GET("/", sharedRouteController.GetSharedRoutes)         // Get all shared routes with pagination/filtering
+		sharedRoutes.POST("/", sharedRouteController.CreateSharedRoute)      // Create a new shared route
+		sharedRoutes.GET("/:id", sharedRouteController.GetSharedRoute)       // Get single shared route by ID
+		sharedRoutes.PUT("/:id", sharedRouteController.UpdateSharedRoute)    // Update shared route (creator only)
+		sharedRoutes.DELETE("/:id", sharedRouteController.DeleteSharedRoute) // Delete shared route (creator only)
+
+		// Interaction endpoints
+		sharedRoutes.POST("/:id/like", sharedRouteController.LikeSharedRoute)         // Toggle like on shared route
+		sharedRoutes.POST("/:id/bookmark", sharedRouteController.BookmarkSharedRoute) // Toggle bookmark on shared route
+		sharedRoutes.POST("/:id/download", sharedRouteController.DownloadSharedRoute) // Download/navigate to route
+
+		// Collection endpoints
+		sharedRoutes.GET("/bookmarked", sharedRouteController.GetBookmarkedRoutes) // Get user's bookmarked routes
+		sharedRoutes.GET("/search", sharedRouteController.SearchSharedRoutes)      // Search routes by query
+
+		// Utility endpoints
+		sharedRoutes.GET("/tags/popular", sharedRouteController.GetPopularTags) // Get popular tags
+		sharedRoutes.GET("/stats", sharedRouteController.GetSharedRouteStats)   // Get route statistics
+	}
+
 	// Motorcycle routes (if implemented)
 	motorcycles := protected.Group("/motorcycles")
 	{
@@ -105,7 +130,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		_ = motorcycles // Prevent unused variable error
 	}
 
-	// Route routes (if implemented)
+	// Route routes (personal routes - different from shared routes)
 	routes := protected.Group("/routes")
 	{
 		// Add route endpoints here when implemented
@@ -195,6 +220,20 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 					"POST /posts/:id/bookmark":    "Bookmark a post",
 					"DELETE /posts/:id/bookmark":  "Remove bookmark",
 					"GET /posts/bookmarked":       "Get bookmarked posts",
+				},
+				"shared-routes": gin.H{
+					"GET /shared-routes/":              "Get all shared routes with filtering",
+					"POST /shared-routes/":             "Create a new shared route",
+					"GET /shared-routes/:id":           "Get single shared route",
+					"PUT /shared-routes/:id":           "Update shared route (creator only)",
+					"DELETE /shared-routes/:id":        "Delete shared route (creator only)",
+					"POST /shared-routes/:id/like":     "Toggle like on shared route",
+					"POST /shared-routes/:id/bookmark": "Toggle bookmark on shared route",
+					"POST /shared-routes/:id/download": "Download/navigate to shared route",
+					"GET /shared-routes/bookmarked":    "Get user's bookmarked routes",
+					"GET /shared-routes/search":        "Search shared routes",
+					"GET /shared-routes/tags/popular":  "Get popular tags",
+					"GET /shared-routes/stats":         "Get shared route statistics",
 				},
 			},
 		})

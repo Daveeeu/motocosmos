@@ -32,7 +32,7 @@ func Migrate(db *gorm.DB) error {
 		&models.EventParticipant{},
 		&models.Post{},
 		&models.PostLike{},
-		&models.PostBookmark{}, // NEW: Bookmark model
+		&models.PostBookmark{},
 		&models.Follow{},
 		&models.RideRecord{},
 		&models.RoutePoint{},
@@ -41,6 +41,10 @@ func Migrate(db *gorm.DB) error {
 		&models.TripCalculation{},
 		&models.Notification{},
 		&models.Comment{},
+		// NEW: Shared Route models
+		&models.SharedRoute{},
+		&models.SharedRouteLike{},
+		&models.SharedRouteBookmark{},
 	)
 
 	if err != nil {
@@ -62,6 +66,38 @@ func Migrate(db *gorm.DB) error {
 
 func addCustomIndexes(db *gorm.DB) error {
 	// Add composite indexes for better query performance
+
+	// Shared Routes indexes
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_shared_routes_creator_created ON shared_routes(creator_id, created_at DESC)").Error; err != nil {
+		fmt.Printf("Warning: Could not create index for shared_routes: %v\n", err)
+	}
+
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_shared_routes_difficulty ON shared_routes(difficulty)").Error; err != nil {
+		fmt.Printf("Warning: Could not create index for shared_routes difficulty: %v\n", err)
+	}
+
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_shared_routes_title ON shared_routes(title)").Error; err != nil {
+		fmt.Printf("Warning: Could not create index for shared_routes title: %v\n", err)
+	}
+
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_shared_routes_creator_name ON shared_routes(creator_name)").Error; err != nil {
+		fmt.Printf("Warning: Could not create index for shared_routes creator_name: %v\n", err)
+	}
+
+	// Shared Route likes composite index
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_shared_route_likes_route_user ON shared_route_likes(route_id, user_id)").Error; err != nil {
+		fmt.Printf("Warning: Could not create index for shared_route_likes: %v\n", err)
+	}
+
+	// Shared Route bookmarks composite index
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_shared_route_bookmarks_route_user ON shared_route_bookmarks(route_id, user_id)").Error; err != nil {
+		fmt.Printf("Warning: Could not create index for shared_route_bookmarks: %v\n", err)
+	}
+
+	// Shared Route bookmarks by user for bookmarked routes list
+	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_shared_route_bookmarks_user_created ON shared_route_bookmarks(user_id, created_at DESC)").Error; err != nil {
+		fmt.Printf("Warning: Could not create index for shared_route_bookmarks user list: %v\n", err)
+	}
 
 	/*	// Posts feed queries
 		if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_posts_user_created ON posts(user_id, created_at DESC)").Error; err != nil {
@@ -129,6 +165,17 @@ func addDatabaseConstraints(db *gorm.DB) error {
 		fmt.Printf("Warning: Could not add check constraint for follows: %v\n", err)
 	}
 
+	// NEW: Shared Route constraints
+	// Prevent duplicate shared route likes
+	if err := db.Exec("ALTER TABLE shared_route_likes ADD CONSTRAINT uk_shared_route_likes_route_user UNIQUE (route_id, user_id)").Error; err != nil {
+		fmt.Printf("Warning: Could not add unique constraint for shared_route_likes: %v\n", err)
+	}
+
+	// Prevent duplicate shared route bookmarks
+	if err := db.Exec("ALTER TABLE shared_route_bookmarks ADD CONSTRAINT uk_shared_route_bookmarks_route_user UNIQUE (route_id, user_id)").Error; err != nil {
+		fmt.Printf("Warning: Could not add unique constraint for shared_route_bookmarks: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -169,6 +216,50 @@ func SeedData(db *gorm.DB) error {
 		}
 	}
 
-	fmt.Println("Database seeded with test data")
+	// Create sample shared routes for testing
+	testSharedRoutes := []models.SharedRoute{
+		{
+			ID:                "route-1",
+			Title:             "Mountain passes",
+			Description:       "Description. Lorem ipsum dolor sit amet consectetur adipiscing elit, sed do",
+			CreatorID:         "user-1",
+			CreatorName:       "John Doe",
+			CreatorAvatar:     "JD",
+			ImageUrls:         models.StringSlice{"https://picsum.photos/300/200?random=1"},
+			TotalDistance:     25.5,
+			TotalElevation:    1200,
+			EstimatedDuration: 7200, // 2 hours in seconds
+			Difficulty:        "Hard",
+			Tags:              models.StringSlice{"mountain", "scenic", "challenging"},
+			LikesCount:        15,
+			CommentsCount:     3,
+			DownloadsCount:    8,
+		},
+		{
+			ID:                "route-2",
+			Title:             "Coastal pathway",
+			Description:       "Breathtaking coastal route with ocean views and hidden beaches perfect for a day trip.",
+			CreatorID:         "user-2",
+			CreatorName:       "Jane Smith",
+			CreatorAvatar:     "JS",
+			ImageUrls:         models.StringSlice{"https://picsum.photos/300/200?random=2"},
+			TotalDistance:     15.2,
+			TotalElevation:    300,
+			EstimatedDuration: 3600, // 1 hour in seconds
+			Difficulty:        "Easy",
+			Tags:              models.StringSlice{"coastal", "beach", "easy"},
+			LikesCount:        23,
+			CommentsCount:     7,
+			DownloadsCount:    12,
+		},
+	}
+
+	for _, route := range testSharedRoutes {
+		if err := db.Create(&route).Error; err != nil {
+			fmt.Printf("Warning: Could not create test shared route %s: %v\n", route.Title, err)
+		}
+	}
+
+	fmt.Println("Database seeded with test data including shared routes")
 	return nil
 }
