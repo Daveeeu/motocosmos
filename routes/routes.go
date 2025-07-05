@@ -20,9 +20,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 	userController := controllers.NewUserController(db, notificationController)
 	postController := controllers.NewPostController(db, notificationController)
 	commentController := controllers.NewCommentController(db, notificationController)
-	sharedRouteController := controllers.NewSharedRouteController(db, notificationController) // NEW
-
-	// Add other controllers as needed
+	sharedRouteController := controllers.NewSharedRouteController(db, notificationController)
+	routeController := controllers.NewRouteController(db) // NEW: Personal routes controller
 
 	// Global middleware
 	router.Use(middleware.SecurityHeaders())
@@ -123,18 +122,35 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		sharedRoutes.GET("/stats", sharedRouteController.GetSharedRouteStats)   // Get route statistics
 	}
 
+	// NEW: Personal Routes - User's own saved routes from route planning
+	routes := protected.Group("/routes")
+	{
+		// Core CRUD operations
+		routes.GET("/", routeController.GetRoutes)           // Get user's routes with pagination/filtering
+		routes.POST("/", routeController.CreateRoute)        // Create/save a new route
+		routes.GET("/saved", routeController.GetSavedRoutes) // Get user's saved routes (alias for GET /)
+		routes.GET("/:id", routeController.GetRoute)         // Get single route by ID
+		routes.PUT("/:id", routeController.UpdateRoute)      // Update route (owner only)
+		routes.DELETE("/:id", routeController.DeleteRoute)   // Delete route (owner only)
+
+		// Route planning endpoints
+		routes.POST("/plan", routeController.PlanRoute)                     // Plan a route using waypoints
+		routes.POST("/calculate-metrics", routeController.CalculateMetrics) // Calculate distance/time between points
+
+		// Route recommendations and discovery
+		routes.GET("/recommendations", routeController.GetRecommendations) // Get recommended public routes
+
+		// Route bookmarking (for public routes from other users)
+		routes.POST("/:id/bookmark", routeController.BookmarkRoute)     // Bookmark a public route
+		routes.DELETE("/:id/bookmark", routeController.UnbookmarkRoute) // Remove bookmark
+		routes.GET("/bookmarked", routeController.GetBookmarkedRoutes)  // Get bookmarked routes
+	}
+
 	// Motorcycle routes (if implemented)
 	motorcycles := protected.Group("/motorcycles")
 	{
 		// Add motorcycle endpoints here when implemented
 		_ = motorcycles // Prevent unused variable error
-	}
-
-	// Route routes (personal routes - different from shared routes)
-	routes := protected.Group("/routes")
-	{
-		// Add route endpoints here when implemented
-		_ = routes // Prevent unused variable error
 	}
 
 	// Event routes (if implemented)
@@ -234,6 +250,20 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 					"GET /shared-routes/search":        "Search shared routes",
 					"GET /shared-routes/tags/popular":  "Get popular tags",
 					"GET /shared-routes/stats":         "Get shared route statistics",
+				},
+				"routes": gin.H{
+					"GET /routes/":                   "Get user's personal routes with filtering",
+					"POST /routes/":                  "Create/save a new route",
+					"GET /routes/saved":              "Get user's saved routes",
+					"GET /routes/:id":                "Get single route by ID",
+					"PUT /routes/:id":                "Update route (owner only)",
+					"DELETE /routes/:id":             "Delete route (owner only)",
+					"POST /routes/plan":              "Plan a route using waypoints",
+					"POST /routes/calculate-metrics": "Calculate distance/time between points",
+					"GET /routes/recommendations":    "Get recommended public routes",
+					"POST /routes/:id/bookmark":      "Bookmark a public route",
+					"DELETE /routes/:id/bookmark":    "Remove bookmark",
+					"GET /routes/bookmarked":         "Get bookmarked routes",
 				},
 			},
 		})

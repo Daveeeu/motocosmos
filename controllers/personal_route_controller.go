@@ -2,7 +2,6 @@
 package controllers
 
 import (
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -132,7 +131,7 @@ func (prc *PersonalRouteController) CreatePersonalRoute(c *gin.Context) {
 
 	var req CreatePersonalRouteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"errorasd": err.Error()})
 		return
 	}
 
