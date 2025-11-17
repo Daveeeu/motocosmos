@@ -22,6 +22,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 	commentController := controllers.NewCommentController(db, notificationController)
 	sharedRouteController := controllers.NewSharedRouteController(db, notificationController)
 	routeController := controllers.NewRouteController(db) // NEW: Personal routes controller
+	socialAuthController := controllers.NewSocialAuthController(db, jwtSecret)
 
 	// Global middleware
 	router.Use(middleware.SecurityHeaders())
@@ -46,6 +47,10 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		auth.POST("/send-password-reset", authController.SendPasswordResetCode)
 		auth.POST("/reset-password-with-code", authController.ResetPasswordWithCode)
 		auth.POST("/reset-password", authController.ResetPassword)
+
+		auth.POST("/google", socialAuthController.GoogleLogin)
+		auth.POST("/apple", socialAuthController.AppleLogin)
+		auth.POST("/facebook", socialAuthController.FacebookLogin)
 	}
 
 	// Protected routes (require authentication)
