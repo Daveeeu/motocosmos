@@ -50,7 +50,7 @@ services:
     container_name: motocosmos_mailhog
     ports:
       - "8025:8025"          # Web UI:    http://localhost:8025
-      - "1026:1026"          # SMTP szerver: 1026-ös porton
+      - "1029:1029"          # SMTP szerver: 1029-ös porton
     networks:
       - motocosmos_network
 volumes:
