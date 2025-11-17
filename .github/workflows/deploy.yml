@@ -1,0 +1,23 @@
+name: Deploy on commit to DEV server
+
+on:
+  push:
+    branches:
+      - main  # Fejlesztési branch, vagy amit használsz
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@v0.1.9
+      with:
+        host: ssh.jandldavid.hu
+        username: felhasznalonev
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          cd /root/motocosmos
+          git fetch --all
+          git reset --hard origin/main
+          docker compose up -d --build

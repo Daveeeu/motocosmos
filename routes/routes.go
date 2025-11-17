@@ -131,7 +131,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		routes.GET("/saved", routeController.GetSavedRoutes) // Get user's saved routes (alias for GET /)
 		routes.GET("/:id", routeController.GetRoute)         // Get single route by ID
 		routes.PUT("/:id", routeController.UpdateRoute)      // Update route (owner only)
-		routes.DELETE("/:id", routeController.DeleteRoute)   // Delete route (owner only)
+	
 
 		// Route planning endpoints
 		routes.POST("/plan", routeController.PlanRoute)                     // Plan a route using waypoints

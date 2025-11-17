@@ -45,7 +45,14 @@ services:
       - "6380:6379"
     networks:
       - motocosmos_network
-
+  mailhog:
+    image: mailhog/mailhog
+    container_name: motocosmos_mailhog
+    ports:
+      - "8025:8025"          # Web UI:    http://localhost:8025
+      - "1026:1026"          # SMTP szerver: 1026-ös porton
+    networks:
+      - motocosmos_network
 volumes:
   mysql_data:
 

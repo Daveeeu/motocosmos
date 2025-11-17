@@ -281,24 +281,51 @@ func (rc *RouteController) convertGeometryToJSONData(geometry []map[string]float
 // GetSavedRoutes returns routes that the user has saved (their own routes)
 func (rc *RouteController) GetSavedRoutes(c *gin.Context) {
 	userID := c.GetString("user_id")
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	fmt.Println("userID:", userID)
+
+	pageStr := c.DefaultQuery("page", "1")
+	limitStr := c.DefaultQuery("limit", "10")
+	fmt.Println("page (string):", pageStr)
+	fmt.Println("limit (string):", limitStr)
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil {
+		fmt.Println("Error parsing page:", err)
+		page = 1
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		fmt.Println("Error parsing limit:", err)
+		limit = 10
+	}
 	offset := (page - 1) * limit
+	fmt.Println("page:", page, "limit:", limit, "offset:", offset)
 
 	var routes []models.Route
 	var total int64
 
-	// Get user's own routes (saved routes are the user's personal routes)
-	query := rc.db.Preload("Waypoints").Where("user_id = ?", userID)
+	// Debug mód bekapcsolása
+	db := rc.db.Debug()
 
-	// Get total count
-	query.Model(&models.Route{}).Count(&total)
+	// Lekérdezés előkészítése
+	query := db.Preload("Waypoints").Where("user_id = ?", userID)
+	fmt.Println("Query prepared for user_id:", userID)
 
-	// Get paginated results
-	if err := query.Order("created_at DESC").Offset(offset).Limit(limit).Find(&routes).Error; err != nil {
+	// Teljes találatszám lekérdezése
+	countResult := query.Model(&models.Route{}).Count(&total)
+	if countResult.Error != nil {
+		fmt.Println("Count query error:", countResult.Error)
+	}
+	fmt.Println("Total routes count:", total)
+
+	// Lapozott eredmények lekérdezése
+	findResult := query.Order("created_at DESC").Offset(offset).Limit(limit).Find(&routes)
+	if findResult.Error != nil {
+		fmt.Println("Find query error:", findResult.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch saved routes"})
 		return
 	}
+	fmt.Printf("Fetched %d routes\n", len(routes))
 
 	c.JSON(http.StatusOK, routes)
 }
