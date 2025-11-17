@@ -91,14 +91,13 @@ func (ac *AuthController) Register(c *gin.Context) {
 		Handle:        handle,
 		Email:         req.Email,
 		Password:      string(hashedPassword),
-		EmailVerified: false, // Explicitly set to false
+		EmailVerified: false,
 	}
 
 	if err := ac.db.Create(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
-
 
 	// Remove password from response
 	user.Password = ""
@@ -112,7 +111,7 @@ func (ac *AuthController) Register(c *gin.Context) {
 func (ac *AuthController) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"erroasdr": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -155,8 +154,6 @@ func (ac *AuthController) Login(c *gin.Context) {
 }
 
 func (ac *AuthController) Logout(c *gin.Context) {
-	// In a stateless JWT system, logout is handled client-side
-	// For enhanced security, you could implement a token blacklist
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out"})
 }
 
@@ -171,20 +168,17 @@ func (ac *AuthController) SendVerificationCode(c *gin.Context) {
 		return
 	}
 
-	// Check if user exists
 	var user models.User
 	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	// Check if already verified
 	if user.EmailVerified {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
 		return
 	}
 
-	// Send verification email
 	code, err := ac.emailService.SendVerificationEmail(user.Email, user.Name)
 	if err != nil {
 		fmt.Printf("Failed to send verification email: %v\n", err)
@@ -192,11 +186,8 @@ func (ac *AuthController) SendVerificationCode(c *gin.Context) {
 		return
 	}
 
-	// For development/testing purposes, also return the code in response
-	// Remove this in production!
 	response := gin.H{"message": "Verification code sent to your email"}
 
-	// Only include the code in development mode
 	if gin.Mode() == gin.DebugMode {
 		response["debug_code"] = code
 	}
@@ -216,48 +207,41 @@ func (ac *AuthController) VerifyCode(c *gin.Context) {
 		return
 	}
 
-	// Find user
 	var user models.User
 	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	// Check if already verified
 	if user.EmailVerified {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
 		return
 	}
 
-	// Verify the code using EmailService
 	if !ac.emailService.VerifyCode(req.Email, req.Code) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired verification code"})
 		return
 	}
 
-	// Mark email as verified
 	if err := ac.db.Model(&user).Update("email_verified", true).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify email"})
 		return
 	}
 
-	// Send welcome email
 	go func() {
 		if err := ac.emailService.SendWelcomeEmail(user.Email, user.Name); err != nil {
 			fmt.Printf("Failed to send welcome email: %v\n", err)
 		}
 	}()
 
-	// Generate JWT token
 	token, err := ac.generateJWT(user.ID, user.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
 	}
 
-	// Remove password from response
 	user.Password = ""
-	user.EmailVerified = true // Update the user object for response
+	user.EmailVerified = true
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Email verified successfully",
@@ -270,7 +254,6 @@ type ResendVerificationRequest struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
-// New endpoint to resend verification code
 func (ac *AuthController) ResendVerificationCode(c *gin.Context) {
 	var req ResendVerificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -278,20 +261,17 @@ func (ac *AuthController) ResendVerificationCode(c *gin.Context) {
 		return
 	}
 
-	// Find user
 	var user models.User
 	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	// Check if already verified
 	if user.EmailVerified {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already verified"})
 		return
 	}
 
-	// Send verification email
 	code, err := ac.emailService.SendVerificationEmail(user.Email, user.Name)
 	if err != nil {
 		fmt.Printf("Failed to resend verification email: %v\n", err)
@@ -299,10 +279,8 @@ func (ac *AuthController) ResendVerificationCode(c *gin.Context) {
 		return
 	}
 
-	// For development/testing purposes, also return the code in response
 	response := gin.H{"message": "Verification code resent to your email"}
 
-	// Only include the code in development mode
 	if gin.Mode() == gin.DebugMode {
 		response["debug_code"] = code
 	}
@@ -310,31 +288,98 @@ func (ac *AuthController) ResendVerificationCode(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-type ResetPasswordRequest struct {
+// =====================================================
+// PASSWORD RESET ENDPOINTS
+// =====================================================
+
+type ForgotPasswordRequest struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
-func (ac *AuthController) ResetPassword(c *gin.Context) {
-	var req ResetPasswordRequest
+func (ac *AuthController) SendPasswordResetCode(c *gin.Context) {
+	var req ForgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Check if user exists
 	var user models.User
 	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
-		// Don't reveal if email exists or not for security
-		c.JSON(http.StatusOK, gin.H{"message": "If the email exists, a reset link has been sent"})
+		// Don't reveal if email exists for security
+		c.JSON(http.StatusOK, gin.H{"message": "If the email exists, a password reset code has been sent"})
 		return
 	}
 
-	// In a real application, you would:
-	// 1. Generate a secure reset token
-	// 2. Store it in database with expiration
-	// 3. Send reset email with the token
+	code, err := ac.emailService.SendPasswordResetEmail(user.Email, user.Name)
+	if err != nil {
+		fmt.Printf("Failed to send password reset email: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send password reset email"})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Password reset email sent"})
+	response := gin.H{"message": "Password reset code sent to your email"}
+
+	if gin.Mode() == gin.DebugMode {
+		response["debug_code"] = code
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+type ResetPasswordWithCodeRequest struct {
+	Email       string `json:"email" binding:"required,email"`
+	Code        string `json:"code" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=6"`
+}
+
+func (ac *AuthController) ResetPasswordWithCode(c *gin.Context) {
+	var req ResetPasswordWithCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user models.User
+	if err := ac.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if !ac.emailService.VerifyCode(req.Email, req.Code) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired reset code"})
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	if err := ac.db.Model(&user).Update("password", string(hashedPassword)).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+		return
+	}
+
+	go func() {
+		if err := ac.emailService.SendPasswordChangedEmail(user.Email, user.Name); err != nil {
+			fmt.Printf("Failed to send password changed email: %v\n", err)
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Password has been reset successfully. You can now login with your new password.",
+	})
+}
+
+func (ac *AuthController) ResetPassword(c *gin.Context) {
+	var req ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ac.SendPasswordResetCode(c)
 }
 
 // Helper functions
@@ -342,7 +387,7 @@ func (ac *AuthController) generateJWT(userID, email string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"email":   email,
-		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(), // 7 days
+		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -363,10 +408,8 @@ func (ac *AuthController) generateUniqueHandle(baseName string) string {
 	for {
 		var existingUser models.User
 		if err := ac.db.Where("handle = ?", handle).First(&existingUser).Error; err != nil {
-			// Handle is available
 			break
 		}
-		// Handle exists, try with number suffix
 		handle = fmt.Sprintf("%s_%d", baseHandle, counter)
 		counter++
 	}

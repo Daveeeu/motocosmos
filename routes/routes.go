@@ -42,6 +42,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		auth.POST("/logout", authController.Logout)
 		auth.POST("/send-verification", authController.SendVerificationCode)
 		auth.POST("/verify-code", authController.VerifyCode)
+	
+		auth.POST("/send-password-reset", authController.SendPasswordResetCode)
+		auth.POST("/reset-password-with-code", authController.ResetPasswordWithCode)
 		auth.POST("/reset-password", authController.ResetPassword)
 	}
 

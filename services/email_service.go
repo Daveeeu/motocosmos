@@ -351,98 +351,199 @@ Happy riding! 🏍️
 	return nil
 }
 
-// Send password reset email
-func (es *EmailService) SendPasswordResetEmail(email, name, resetToken string) error {
+// =====================================================
+// PASSWORD RESET METHODS
+// =====================================================
+
+// SendPasswordResetEmail sends a password reset verification code
+func (es *EmailService) SendPasswordResetEmail(email, name string) (string, error) {
+	// Check if there's already a valid unused code
+	es.mutex.RLock()
+	existingCode, exists := es.verificationCodes[email]
+	es.mutex.RUnlock()
+
+	var code string
+	if exists && !existingCode.Used && time.Now().Before(existingCode.ExpiresAt) {
+		// Reuse existing valid code
+		code = existingCode.Code
+		fmt.Printf("🔐 Reusing existing password reset code for %s: %s\n", email, code)
+	} else {
+		// Generate new code
+		code = es.generateVerificationCode()
+
+		// Store verification code (expires in 10 minutes)
+		es.mutex.Lock()
+		es.verificationCodes[email] = VerificationCode{
+			Code:      code,
+			Email:     email,
+			ExpiresAt: time.Now().Add(10 * time.Minute),
+			Used:      false,
+		}
+		es.mutex.Unlock()
+		fmt.Printf("🔐 Generated new password reset code for %s: %s\n", email, code)
+	}
+
+	// Create email message
 	m := gomail.NewMessage()
 	m.SetHeader("From", fmt.Sprintf("%s <%s>", es.config.FromName, es.config.FromEmail))
 	m.SetHeader("To", email)
-	m.SetHeader("Subject", "MotoCosmos - Password Reset Request")
-
-	resetURL := fmt.Sprintf("https://motocosmos.app/reset-password?token=%s", resetToken)
+	m.SetHeader("Subject", "Password Reset - MotoCosmos")
 
 	htmlBody := fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Password Reset</title>
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
         .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { text-align: center; background: #dc3545; color: white; padding: 20px; border-radius: 10px 10px 0 0; }
-        .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px; }
-        .btn { display: inline-block; background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 10px 0; }
-        .warning { background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107; margin: 20px 0; }
-        .footer { text-align: center; margin-top: 20px; color: #666; font-size: 14px; }
+        .header { background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+        .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+        .code-box { background: white; border: 2px dashed #667eea; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
+        .code { font-size: 32px; font-weight: bold; color: #667eea; letter-spacing: 8px; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+        .footer { text-align: center; color: #666; font-size: 12px; margin-top: 20px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔒 Password Reset</h1>
-            <p>MotoCosmos Account</p>
+            <h1>🔐 Password Reset Request</h1>
         </div>
         <div class="content">
-            <h2>Hello %s!</h2>
-            <p>We received a request to reset the password for your MotoCosmos account.</p>
+            <p>Hi %s,</p>
+            <p>We received a request to reset your password for your MotoCosmos account.</p>
             
-            <p>Click the button below to reset your password:</p>
-            <a href="%s" class="btn">Reset Password</a>
-            
-            <div class="warning">
-                <p><strong>⚠️ Important Security Information:</strong></p>
-                <ul>
-                    <li>This link will expire in 1 hour</li>
-                    <li>If you didn't request this reset, please ignore this email</li>
-                    <li>Never share this link with anyone</li>
-                </ul>
+            <div class="code-box">
+                <p style="margin: 0; color: #666;">Your verification code is:</p>
+                <div class="code">%s</div>
+                <p style="margin: 10px 0 0 0; color: #666; font-size: 14px;">This code will expire in 10 minutes</p>
             </div>
-            
-            <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
-            <p style="word-break: break-all; color: #007bff;">%s</p>
-            
-            <p>If you didn't request a password reset, your account is still secure and no action is needed.</p>
-            
-            <p>Stay safe! 🛡️</p>
-            <p><strong>The MotoCosmos Team</strong></p>
+
+            <div class="warning">
+                <strong>⚠️ Security Notice:</strong><br>
+                If you didn't request a password reset, please ignore this email. Your password will remain unchanged.
+            </div>
+
+            <p>For security reasons, never share this code with anyone.</p>
         </div>
         <div class="footer">
-            <p>© 2025 MotoCosmos. All rights reserved.</p>
-            <p>This is an automated security email.</p>
+            <p>© 2024 MotoCosmos. All rights reserved.</p>
+            <p>This is an automated message, please do not reply.</p>
         </div>
     </div>
 </body>
-</html>`, name, resetURL, resetURL)
+</html>
+`, name, code)
 
 	textBody := fmt.Sprintf(`
-Hello %s!
+Hi %s!
 
-We received a request to reset the password for your MotoCosmos account.
+We received a request to reset your password for your MotoCosmos account.
 
-To reset your password, please visit: %s
+Your verification code is: %s
 
-⚠️ Important Security Information:
-- This link will expire in 1 hour
-- If you didn't request this reset, please ignore this email  
-- Never share this link with anyone
+This code will expire in 10 minutes.
 
-If you didn't request a password reset, your account is still secure and no action is needed.
+⚠️ Security Notice:
+If you didn't request a password reset, please ignore this email. Your password will remain unchanged.
 
-Stay safe!
+For security reasons, never share this code with anyone.
+
 The MotoCosmos Team
 
-© 2025 MotoCosmos. All rights reserved.
-This is an automated security email.
-    `, name, resetURL)
+© 2024 MotoCosmos. All rights reserved.
+This is an automated message, please do not reply.
+    `, name, code)
+
+	m.SetBody("text/plain", textBody)
+	m.AddAlternative("text/html", htmlBody)
+
+	// Send email
+	if err := es.dialer.DialAndSend(m); err != nil {
+		return "", fmt.Errorf("failed to send password reset email: %w", err)
+	}
+
+	fmt.Printf("🔐 Password reset email sent to %s with code: %s\n", email, code)
+	return code, nil
+}
+
+// SendPasswordChangedEmail sends a confirmation after password is changed
+func (es *EmailService) SendPasswordChangedEmail(email, name string) error {
+	m := gomail.NewMessage()
+	m.SetHeader("From", fmt.Sprintf("%s <%s>", es.config.FromName, es.config.FromEmail))
+	m.SetHeader("To", email)
+	m.SetHeader("Subject", "Password Changed Successfully - MotoCosmos")
+
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #28a745 0%%, #20c997 100%%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+        .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+        .success-box { background: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; border-radius: 4px; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+        .footer { text-align: center; color: #666; font-size: 12px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>✅ Password Changed</h1>
+        </div>
+        <div class="content">
+            <p>Hi %s,</p>
+            
+            <div class="success-box">
+                <strong>✓ Success!</strong><br>
+                Your password has been changed successfully.
+            </div>
+
+            <p>You can now log in to your MotoCosmos account using your new password.</p>
+
+            <div class="warning">
+                <strong>⚠️ Didn't make this change?</strong><br>
+                If you didn't change your password, please contact our support team immediately at support@motocosmos.com
+            </div>
+
+            <p>Thank you for keeping your account secure!</p>
+        </div>
+        <div class="footer">
+            <p>© 2024 MotoCosmos. All rights reserved.</p>
+            <p>This is an automated message, please do not reply.</p>
+        </div>
+    </div>
+</body>
+</html>
+`, name)
+
+	textBody := fmt.Sprintf(`
+Hi %s!
+
+✓ Success! Your password has been changed successfully.
+
+You can now log in to your MotoCosmos account using your new password.
+
+⚠️ Didn't make this change?
+If you didn't change your password, please contact our support team immediately at support@motocosmos.com
+
+Thank you for keeping your account secure!
+
+The MotoCosmos Team
+
+© 2024 MotoCosmos. All rights reserved.
+This is an automated message, please do not reply.
+    `, name)
 
 	m.SetBody("text/plain", textBody)
 	m.AddAlternative("text/html", htmlBody)
 
 	if err := es.dialer.DialAndSend(m); err != nil {
-		return fmt.Errorf("failed to send password reset email: %w", err)
+		return fmt.Errorf("failed to send password changed email: %w", err)
 	}
 
-	fmt.Printf("📧 Password reset email sent to %s\n", email)
+	fmt.Printf("✅ Password changed confirmation email sent to %s\n", email)
 	return nil
 }
