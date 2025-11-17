@@ -99,14 +99,6 @@ func (ac *AuthController) Register(c *gin.Context) {
 		return
 	}
 
-	// Send verification email
-	_, err = ac.emailService.SendVerificationEmail(user.Email, user.Name)
-	if err != nil {
-		// Log error but don't fail registration
-		fmt.Printf("Failed to send verification email: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification email"})
-		return
-	}
 
 	// Remove password from response
 	user.Password = ""

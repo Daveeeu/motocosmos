@@ -57,17 +57,31 @@ func (es *EmailService) generateVerificationCode() string {
 
 // Send verification email
 func (es *EmailService) SendVerificationEmail(email, name string) (string, error) {
-	code := es.generateVerificationCode()
+	// Check if there's already a valid unused code
+	es.mutex.RLock()
+	existingCode, exists := es.verificationCodes[email]
+	es.mutex.RUnlock()
 
-	// Store verification code (expires in 10 minutes)
-	es.mutex.Lock()
-	es.verificationCodes[email] = VerificationCode{
-		Code:      code,
-		Email:     email,
-		ExpiresAt: time.Now().Add(10 * time.Minute),
-		Used:      false,
+	var code string
+	if exists && !existingCode.Used && time.Now().Before(existingCode.ExpiresAt) {
+		// Reuse existing valid code
+		code = existingCode.Code
+		fmt.Printf("📧 Reusing existing verification code for %s: %s\n", email, code)
+	} else {
+		// Generate new code
+		code = es.generateVerificationCode()
+
+		// Store verification code (expires in 10 minutes)
+		es.mutex.Lock()
+		es.verificationCodes[email] = VerificationCode{
+			Code:      code,
+			Email:     email,
+			ExpiresAt: time.Now().Add(10 * time.Minute),
+			Used:      false,
+		}
+		es.mutex.Unlock()
+		fmt.Printf("📧 Generated new verification code for %s: %s\n", email, code)
 	}
-	es.mutex.Unlock()
 
 	// Create email message
 	m := gomail.NewMessage()

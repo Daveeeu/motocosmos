@@ -22,7 +22,7 @@ type Config struct {
 }
 
 func Load() *Config {
-    smtpPort, _ := strconv.Atoi(getEnv("SMTP_PORT", "1026"))
+    smtpPort, _ := strconv.Atoi(getEnv("SMTP_PORT", "1025"))
     return &Config{
         Port:        getEnv("PORT", "8080"),
         DatabaseURL: getEnv("DATABASE_URL", "user:password@tcp(localhost:3306)/motocosmos?charset=utf8mb4&parseTime=True&loc=Local"),
