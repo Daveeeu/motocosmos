@@ -2,25 +2,265 @@
 package controllers
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"math"
+	"mime/multipart"
 	"motocosmos-api/models"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 )
 
 type PostController struct {
 	db                     *gorm.DB
 	notificationController *NotificationController
+	uploadPath             string // Path where images will be stored
 }
 
 func NewPostController(db *gorm.DB, notificationController *NotificationController) *PostController {
+	// Create uploads directory if it doesn't exist
+	uploadPath := "./uploads/posts"
+	if err := os.MkdirAll(uploadPath, 0755); err != nil {
+		panic(fmt.Sprintf("Failed to create upload directory: %v", err))
+	}
+
 	return &PostController{
 		db:                     db,
 		notificationController: notificationController,
+		uploadPath:             uploadPath,
 	}
+}
+
+// UploadImage handles image upload for posts
+func (pc *PostController) UploadImage(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Parse multipart form
+	file, err := c.FormFile("image")
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to get file: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No image file provided"})
+		return
+	}
+
+	fmt.Printf("[DEBUG] Received file: %s, size: %d\n", file.Filename, file.Size)
+
+	// Validate file size (max 10MB)
+	if file.Size > 10*1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File size too large (max 10MB)"})
+		return
+	}
+
+	// Validate file type
+	if !isValidImageType(file) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type. Only JPG, PNG, and WebP are allowed"})
+		return
+	}
+
+	// Generate unique filename
+	ext := filepath.Ext(file.Filename)
+	filename := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), ext)
+	fmt.Printf("[DEBUG] Generated filename: %s\n", filename)
+
+	// Create user-specific subdirectory
+	userUploadPath := filepath.Join(pc.uploadPath, userID)
+	fmt.Printf("[DEBUG] User upload path: %s\n", userUploadPath)
+	
+	if err := os.MkdirAll(userUploadPath, 0755); err != nil {
+		fmt.Printf("[ERROR] Failed to create directory: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
+		return
+	}
+
+	// Full path for the file
+	filePath := filepath.Join(userUploadPath, filename)
+	fmt.Printf("[DEBUG] Full file path: %s\n", filePath)
+
+	// Save the file
+	if err := c.SaveUploadedFile(file, filePath); err != nil {
+		fmt.Printf("[ERROR] Failed to save file: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+		return
+	}
+
+	// Verify file was created
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		fmt.Printf("[ERROR] File does not exist after save: %s\n", filePath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "File was not saved"})
+		return
+	}
+
+	fileInfo, _ := os.Stat(filePath)
+	fmt.Printf("[SUCCESS] File saved successfully: %s (size: %d bytes)\n", filePath, fileInfo.Size())
+
+	// Generate URL for the uploaded image
+	imageURL := fmt.Sprintf("/uploads/posts/%s/%s", userID, filename)
+
+	c.JSON(http.StatusOK, gin.H{
+		"url":      imageURL,
+		"filename": filename,
+		"size":     file.Size,
+		"message":  "Image uploaded successfully",
+	})
+}
+
+// UploadMultipleImages handles multiple image uploads at once
+func (pc *PostController) UploadMultipleImages(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Parse multipart form
+	form, err := c.MultipartForm()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse form"})
+		return
+	}
+
+	files := form.File["images"]
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No images provided"})
+		return
+	}
+
+	// Limit to 10 images per request
+	if len(files) > 10 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Too many images (max 10)"})
+		return
+	}
+
+	// Create user-specific subdirectory
+	userUploadPath := filepath.Join(pc.uploadPath, userID)
+	if err := os.MkdirAll(userUploadPath, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
+		return
+	}
+
+	uploadedImages := []map[string]interface{}{}
+
+	for _, file := range files {
+		// Validate file size
+		if file.Size > 10*1024*1024 {
+			continue // Skip files larger than 10MB
+		}
+
+		// Validate file type
+		if !isValidImageType(file) {
+			continue // Skip invalid file types
+		}
+
+		// Generate unique filename
+		ext := filepath.Ext(file.Filename)
+		filename := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), ext)
+		filepath := filepath.Join(userUploadPath, filename)
+
+		// Save the file
+		if err := c.SaveUploadedFile(file, filepath); err != nil {
+			continue // Skip files that fail to save
+		}
+
+		// Generate URL
+		imageURL := fmt.Sprintf("/uploads/posts/%s/%s", userID, filename)
+
+		uploadedImages = append(uploadedImages, map[string]interface{}{
+			"url":      imageURL,
+			"filename": filename,
+			"size":     file.Size,
+		})
+	}
+
+	if len(uploadedImages) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No valid images were uploaded"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"images":  uploadedImages,
+		"count":   len(uploadedImages),
+		"message": "Images uploaded successfully",
+	})
+}
+
+// DeleteImage handles image deletion
+func (pc *PostController) DeleteImage(c *gin.Context) {
+	userID := c.GetString("user_id")
+	imageURL := c.Query("url")
+
+	if imageURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Image URL is required"})
+		return
+	}
+
+	// Parse the URL to get the filename
+	// Expected format: /uploads/posts/{user_id}/{filename}
+	parts := strings.Split(imageURL, "/")
+	if len(parts) < 4 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image URL"})
+		return
+	}
+
+	urlUserID := parts[len(parts)-2]
+	filename := parts[len(parts)-1]
+
+	// Security check: ensure user can only delete their own images
+	if urlUserID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own images"})
+		return
+	}
+
+	// Build file path
+	filePath := filepath.Join(pc.uploadPath, urlUserID, filename)
+
+	// Delete the file
+	if err := os.Remove(filePath); err != nil {
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete image"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Image deleted successfully"})
+}
+
+// Helper function to validate image type
+func isValidImageType(file *multipart.FileHeader) bool {
+	// Check file extension
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	validExtensions := []string{".jpg", ".jpeg", ".png", ".webp", ".gif"}
+	
+	for _, validExt := range validExtensions {
+		if ext == validExt {
+			return true
+		}
+	}
+
+	// Also check MIME type if available
+	if file.Header != nil {
+		contentType := file.Header.Get("Content-Type")
+		validTypes := []string{"image/jpeg", "image/png", "image/webp", "image/gif"}
+		
+		for _, validType := range validTypes {
+			if contentType == validType {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 type CreatePostRequest struct {

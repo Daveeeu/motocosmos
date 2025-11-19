@@ -24,6 +24,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 	routeController := controllers.NewRouteController(db) // NEW: Personal routes controller
 	socialAuthController := controllers.NewSocialAuthController(db, jwtSecret)
 
+	router.Static("/uploads", "./uploads")
+
 	// Global middleware
 	router.Use(middleware.SecurityHeaders())
 	router.Use(middleware.ErrorHandler())
@@ -104,6 +106,10 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		posts.POST("/:id/bookmark", postController.BookmarkPost)           // Bookmark a post
 		posts.DELETE("/:id/bookmark", postController.UnbookmarkPost)       // Remove bookmark
 		posts.GET("/bookmarked", postController.GetBookmarkedPosts)        // Get user's bookmarked posts
+
+		posts.POST("/upload-image", postController.UploadImage)           // Single image upload
+		posts.POST("/upload-images", postController.UploadMultipleImages) // Multiple images upload
+		posts.DELETE("/delete-image", postController.DeleteImage)         // Delete image
 	}
 
 	// NEW: Shared Routes - Public exploration of community routes

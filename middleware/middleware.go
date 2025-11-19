@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
+	"strings"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
@@ -145,18 +145,40 @@ type ValidationErrorResponse struct {
 // ValidateJSON middleware to ensure request has valid JSON content type
 func ValidateJSON() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH" {
-			contentType := c.GetHeader("Content-Type")
-			if contentType != "application/json; charset=utf-8" {
-				c.JSON(http.StatusBadRequest, ErrorResponse{
-					Error:   "Invalid content type",
-					Message: "Content-Type must be application/json; charset=utf-8" + contentType,
-					Code:    http.StatusBadRequest,
-				})
-				c.Abort()
+		// Skip validation for certain endpoints that handle file uploads
+		skipPaths := []string{
+			"/posts/upload-image",
+			"/posts/upload-images",
+			"/shared-routes/upload-image",
+			"/users/upload-avatar",
+		}
+
+		// Check if current path should skip JSON validation
+		for _, path := range skipPaths {
+			if strings.Contains(c.Request.URL.Path, path) {
+				c.Next()
 				return
 			}
 		}
+
+		// Skip validation for GET, DELETE, and OPTIONS requests
+		if c.Request.Method == "GET" || c.Request.Method == "DELETE" || c.Request.Method == "OPTIONS" {
+			c.Next()
+			return
+		}
+
+		// For POST, PUT, PATCH - validate Content-Type
+		contentType := c.GetHeader("Content-Type")
+		if !strings.Contains(contentType, "application/json") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Invalid content type",
+				"message": "Content-Type must be application/json; charset=utf-8",
+				"code":    http.StatusBadRequest,
+			})
+			c.Abort()
+			return
+		}
+
 		c.Next()
 	}
 }
