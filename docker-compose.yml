@@ -53,6 +53,23 @@ services:
       - "1029:1029"          # SMTP szerver: 1029-ös porton
     networks:
       - motocosmos_network
+    
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: motocosmos_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80"            # Web UI:    http://localhost:8081
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_USER: motocosmos_user
+      PMA_PASSWORD: motocosmos_password
+      MYSQL_ROOT_PASSWORD: rootpassword
+    depends_on:
+      - db
+    networks:
+      - motocosmos_network
 volumes:
   mysql_data:
 
