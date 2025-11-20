@@ -112,6 +112,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		posts.DELETE("/delete-image", postController.DeleteImage)         // Delete image
 	}
 
+	v1.GET("/posts/images/:user_id/:file", postController.GetImage)
+
+
 	// NEW: Shared Routes - Public exploration of community routes
 	sharedRoutes := protected.Group("/shared-routes")
 	{

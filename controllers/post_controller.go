@@ -2,10 +2,15 @@
 package controllers
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"gorm.io/gorm"
+	"io"
 	"math"
 	"mime/multipart"
 	"motocosmos-api/models"
@@ -20,24 +25,71 @@ import (
 type PostController struct {
 	db                     *gorm.DB
 	notificationController *NotificationController
-	uploadPath             string // Path where images will be stored
+	minioClient            *minio.Client
+	bucketName             string
 }
 
 func NewPostController(db *gorm.DB, notificationController *NotificationController) *PostController {
-	// Create uploads directory if it doesn't exist
-	uploadPath := "./uploads/posts"
-	if err := os.MkdirAll(uploadPath, 0755); err != nil {
-		panic(fmt.Sprintf("Failed to create upload directory: %v", err))
+	// MinIO konfiguráció környezeti változókból
+	endpoint := os.Getenv("MINIO_ENDPOINT")
+	accessKey := os.Getenv("MINIO_ACCESS_KEY")
+	secretKey := os.Getenv("MINIO_SECRET_KEY")
+	useSSL := os.Getenv("MINIO_USE_SSL") == "true"
+	bucketName := os.Getenv("MINIO_BUCKET_NAME")
+	
+	if bucketName == "" {
+		bucketName = "motocosmos-posts" // default bucket név
+	}
+
+	// MinIO client létrehozása
+	minioClient, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: useSSL,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create MinIO client: %v", err))
+	}
+
+	// Bucket létrehozása, ha nem létezik
+	ctx := context.Background()
+	exists, err := minioClient.BucketExists(ctx, bucketName)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to check bucket: %v", err))
+	}
+	
+	if !exists {
+		err = minioClient.MakeBucket(ctx, bucketName, minio.MakeBucketOptions{})
+		if err != nil {
+			panic(fmt.Sprintf("Failed to create bucket: %v", err))
+		}
+		fmt.Printf("Bucket '%s' created successfully\n", bucketName)
+		
+		// Bucket policy beállítása (opcionális - public read access)
+		policy := fmt.Sprintf(`{
+			"Version": "2012-10-17",
+			"Statement": [{
+				"Effect": "Allow",
+				"Principal": {"AWS": ["*"]},
+				"Action": ["s3:GetObject"],
+				"Resource": ["arn:aws:s3:::%s/*"]
+			}]
+		}`, bucketName)
+		
+		err = minioClient.SetBucketPolicy(ctx, bucketName, policy)
+		if err != nil {
+			fmt.Printf("Warning: Failed to set bucket policy: %v\n", err)
+		}
 	}
 
 	return &PostController{
 		db:                     db,
 		notificationController: notificationController,
-		uploadPath:             uploadPath,
+		minioClient:            minioClient,
+		bucketName:             bucketName,
 	}
 }
 
-// UploadImage handles image upload for posts
+// UploadImage handles image upload for posts to MinIO
 func (pc *PostController) UploadImage(c *gin.Context) {
 	userID := c.GetString("user_id")
 	if userID == "" {
@@ -70,41 +122,57 @@ func (pc *PostController) UploadImage(c *gin.Context) {
 	// Generate unique filename
 	ext := filepath.Ext(file.Filename)
 	filename := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), ext)
-	fmt.Printf("[DEBUG] Generated filename: %s\n", filename)
-
-	// Create user-specific subdirectory
-	userUploadPath := filepath.Join(pc.uploadPath, userID)
-	fmt.Printf("[DEBUG] User upload path: %s\n", userUploadPath)
 	
-	if err := os.MkdirAll(userUploadPath, 0755); err != nil {
-		fmt.Printf("[ERROR] Failed to create directory: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
+	// MinIO object path: posts/{userID}/{filename}
+	objectName := fmt.Sprintf("posts/%s/%s", userID, filename)
+	fmt.Printf("[DEBUG] MinIO object name: %s\n", objectName)
+
+	// Open uploaded file
+	src, err := file.Open()
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to open file: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open file"})
+		return
+	}
+	defer src.Close()
+
+	// Read file into buffer
+	buffer := bytes.NewBuffer(nil)
+	if _, err := io.Copy(buffer, src); err != nil {
+		fmt.Printf("[ERROR] Failed to read file: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
 		return
 	}
 
-	// Full path for the file
-	filePath := filepath.Join(userUploadPath, filename)
-	fmt.Printf("[DEBUG] Full file path: %s\n", filePath)
+	// Determine content type
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
 
-	// Save the file
-	if err := c.SaveUploadedFile(file, filePath); err != nil {
-		fmt.Printf("[ERROR] Failed to save file: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file"})
+	// Upload to MinIO
+	ctx := context.Background()
+	info, err := pc.minioClient.PutObject(
+		ctx,
+		pc.bucketName,
+		objectName,
+		bytes.NewReader(buffer.Bytes()),
+		int64(buffer.Len()),
+		minio.PutObjectOptions{
+			ContentType: contentType,
+		},
+	)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to upload to MinIO: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file"})
 		return
 	}
 
-	// Verify file was created
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		fmt.Printf("[ERROR] File does not exist after save: %s\n", filePath)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "File was not saved"})
-		return
-	}
-
-	fileInfo, _ := os.Stat(filePath)
-	fmt.Printf("[SUCCESS] File saved successfully: %s (size: %d bytes)\n", filePath, fileInfo.Size())
+	fmt.Printf("[SUCCESS] File uploaded to MinIO: %s (size: %d bytes)\n", objectName, info.Size)
 
 	// Generate URL for the uploaded image
-	imageURL := fmt.Sprintf("/uploads/posts/%s/%s", userID, filename)
+	// Format: /api/images/{bucketName}/{objectName}
+	imageURL := fmt.Sprintf("/api/images/%s/%s", pc.bucketName, objectName)
 
 	c.JSON(http.StatusOK, gin.H{
 		"url":      imageURL,
@@ -113,6 +181,52 @@ func (pc *PostController) UploadImage(c *gin.Context) {
 		"message":  "Image uploaded successfully",
 	})
 }
+
+func (pc *PostController) GetImage(c *gin.Context) {
+    userID := c.Param("user_id")
+    file := c.Param("file")
+    objectName := fmt.Sprintf("posts/%s/%s", userID, file)
+
+    obj, err := pc.minioClient.GetObject(context.Background(), pc.bucketName, objectName, minio.GetObjectOptions{})
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch file"})
+        return
+    }
+    defer obj.Close()
+
+    // Ellenőrizzük, hogy olvasható-e az objektum
+    stat, err := obj.Stat()
+    if err != nil {
+        c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+        return
+    }
+
+    // Beállítjuk a Content-Type fejlécet az objektum ContentType-jára vagy fájlkiterjesztés alapján
+    contentType := stat.ContentType
+    if contentType == "" || contentType == "application/octet-stream" {
+        ext := strings.ToLower(filepath.Ext(file))
+        switch ext {
+        case ".jpg", ".jpeg":
+            contentType = "image/jpeg"
+        case ".png":
+            contentType = "image/png"
+        case ".webp":
+            contentType = "image/webp"
+        default:
+            contentType = "application/octet-stream"
+        }
+    }
+
+    c.Header("Content-Type", contentType)
+
+    // A letöltés helyett közvetlenül az íróra másoljuk az objektum tartalmát
+    if _, err := io.Copy(c.Writer, obj); err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
+        return
+    }
+}
+
+
 
 // UploadMultipleImages handles multiple image uploads at once
 func (pc *PostController) UploadMultipleImages(c *gin.Context) {
@@ -141,14 +255,8 @@ func (pc *PostController) UploadMultipleImages(c *gin.Context) {
 		return
 	}
 
-	// Create user-specific subdirectory
-	userUploadPath := filepath.Join(pc.uploadPath, userID)
-	if err := os.MkdirAll(userUploadPath, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
-		return
-	}
-
 	uploadedImages := []map[string]interface{}{}
+	ctx := context.Background()
 
 	for _, file := range files {
 		// Validate file size
@@ -164,20 +272,50 @@ func (pc *PostController) UploadMultipleImages(c *gin.Context) {
 		// Generate unique filename
 		ext := filepath.Ext(file.Filename)
 		filename := fmt.Sprintf("%s_%d%s", uuid.New().String(), time.Now().Unix(), ext)
-		filepath := filepath.Join(userUploadPath, filename)
+		objectName := fmt.Sprintf("posts/%s/%s", userID, filename)
 
-		// Save the file
-		if err := c.SaveUploadedFile(file, filepath); err != nil {
-			continue // Skip files that fail to save
+		// Open file
+		src, err := file.Open()
+		if err != nil {
+			continue
+		}
+
+		// Read into buffer
+		buffer := bytes.NewBuffer(nil)
+		if _, err := io.Copy(buffer, src); err != nil {
+			src.Close()
+			continue
+		}
+		src.Close()
+
+		// Determine content type
+		contentType := file.Header.Get("Content-Type")
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+
+		// Upload to MinIO
+		info, err := pc.minioClient.PutObject(
+			ctx,
+			pc.bucketName,
+			objectName,
+			bytes.NewReader(buffer.Bytes()),
+			int64(buffer.Len()),
+			minio.PutObjectOptions{
+				ContentType: contentType,
+			},
+		)
+		if err != nil {
+			continue
 		}
 
 		// Generate URL
-		imageURL := fmt.Sprintf("/uploads/posts/%s/%s", userID, filename)
+		imageURL := fmt.Sprintf("/api/images/%s/%s", pc.bucketName, objectName)
 
 		uploadedImages = append(uploadedImages, map[string]interface{}{
 			"url":      imageURL,
 			"filename": filename,
-			"size":     file.Size,
+			"size":     info.Size,
 		})
 	}
 
@@ -193,7 +331,7 @@ func (pc *PostController) UploadMultipleImages(c *gin.Context) {
 	})
 }
 
-// DeleteImage handles image deletion
+// DeleteImage handles image deletion from MinIO
 func (pc *PostController) DeleteImage(c *gin.Context) {
 	userID := c.GetString("user_id")
 	imageURL := c.Query("url")
@@ -203,14 +341,15 @@ func (pc *PostController) DeleteImage(c *gin.Context) {
 		return
 	}
 
-	// Parse the URL to get the filename
-	// Expected format: /uploads/posts/{user_id}/{filename}
+	// Parse the URL to get the object name
+	// Expected format: /api/images/{bucketName}/posts/{user_id}/{filename}
 	parts := strings.Split(imageURL, "/")
-	if len(parts) < 4 {
+	if len(parts) < 6 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image URL"})
 		return
 	}
 
+	// Extract: posts/{user_id}/{filename}
 	urlUserID := parts[len(parts)-2]
 	filename := parts[len(parts)-1]
 
@@ -220,16 +359,14 @@ func (pc *PostController) DeleteImage(c *gin.Context) {
 		return
 	}
 
-	// Build file path
-	filePath := filepath.Join(pc.uploadPath, urlUserID, filename)
+	objectName := fmt.Sprintf("posts/%s/%s", urlUserID, filename)
 
-	// Delete the file
-	if err := os.Remove(filePath); err != nil {
-		if os.IsNotExist(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete image"})
-		}
+	// Delete from MinIO
+	ctx := context.Background()
+	err := pc.minioClient.RemoveObject(ctx, pc.bucketName, objectName, minio.RemoveObjectOptions{})
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to delete from MinIO: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete image"})
 		return
 	}
 
@@ -262,6 +399,7 @@ func isValidImageType(file *multipart.FileHeader) bool {
 
 	return false
 }
+
 
 type CreatePostRequest struct {
 	Title     string   `json:"title" binding:"required"`
