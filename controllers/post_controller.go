@@ -172,7 +172,8 @@ func (pc *PostController) UploadImage(c *gin.Context) {
 
 	// Generate URL for the uploaded image
 	// Format: /api/images/{bucketName}/{objectName}
-	imageURL := fmt.Sprintf("/api/images/%s/%s", pc.bucketName, objectName)
+	relativePath := fmt.Sprintf("%s/%s", userID, filename)
+	imageURL := fmt.Sprintf("/api/v1/posts/images/%s", relativePath)
 
 	c.JSON(http.StatusOK, gin.H{
 		"url":      imageURL,
