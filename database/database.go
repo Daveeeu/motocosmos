@@ -46,6 +46,8 @@ func Migrate(db *gorm.DB) error {
 		&models.SharedRoute{},
 		&models.SharedRouteLike{},
 		&models.SharedRouteBookmark{},
+		  &models.FriendRequest{},
+        &models.Friendship{},   
 	)
 
 	if err != nil {
