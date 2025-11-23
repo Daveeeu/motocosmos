@@ -10,6 +10,8 @@ import (
 	"motocosmos-api/config"
 	"motocosmos-api/database"
 	"motocosmos-api/routes"
+	"motocosmos-api/jobs"
+	"time"
 )
 
 func main() {
@@ -64,6 +66,9 @@ func main() {
 	fmt.Printf("📚 API Documentation: http://localhost:%s/api/v1/docs\n", cfg.Port)
 	fmt.Printf("💚 Health Check: http://localhost:%s/api/v1/health\n", cfg.Port)
 
+	cleanupJob := jobs.NewLocationCleanupJob(db, 5*time.Minute)
+	cleanupJob.Start()
+    defer cleanupJob.Stop()
 	if err := router.Run(":" + cfg.Port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

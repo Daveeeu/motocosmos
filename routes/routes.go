@@ -23,6 +23,8 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 	sharedRouteController := controllers.NewSharedRouteController(db, notificationController)
 	routeController := controllers.NewRouteController(db) // NEW: Personal routes controller
 	socialAuthController := controllers.NewSocialAuthController(db, jwtSecret)
+	locatorController := controllers.NewLocatorController(db)
+	friendController := controllers.NewFriendController(db, notificationController)
 
 	router.Static("/uploads", "./uploads")
 
@@ -74,6 +76,18 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		users.GET("/following-status/:user_id", userController.GetFollowingStatus) // Check if following a user
 		users.GET("/search", userController.SearchUsers)                           // Search users by name/handle
 		users.GET("/handle/:handle", userController.GetUserByHandle)               // Get user by handle
+	}
+
+	friends := protected.Group("/friends")
+	{
+		friends.POST("/request/:user_id", friendController.SendFriendRequest)
+		friends.POST("/accept/:request_id", friendController.AcceptFriendRequest)
+		friends.POST("/reject/:request_id", friendController.RejectFriendRequest)
+		friends.DELETE("/:user_id", friendController.RemoveFriend)
+		friends.GET("/", friendController.GetFriends)
+		friends.GET("/requests/pending", friendController.GetPendingRequests)
+		friends.GET("/requests/sent", friendController.GetSentRequests)
+		friends.GET("/status/:user_id", friendController.GetFriendshipStatus) // ÚJ
 	}
 
 	// Notification routes
@@ -139,6 +153,17 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, jwtSecret string) {
 		sharedRoutes.GET("/stats", sharedRouteController.GetSharedRouteStats)   // Get route statistics
 	}
 
+
+	// Locator routes - Friend location sharing
+	locator := protected.Group("/locator")
+	{
+		locator.GET("/", locatorController.GetLocator)
+		locator.POST("/location", locatorController.UpdateLocation)
+		locator.POST("/visibility", locatorController.UpdateVisibility)
+		locator.GET("/settings", locatorController.GetVisibilitySettings)
+		locator.GET("/nearby", locatorController.GetNearbyUsers)
+	}
+	
 	// NEW: Personal Routes - User's own saved routes from route planning
 	routes := protected.Group("/routes")
 	{

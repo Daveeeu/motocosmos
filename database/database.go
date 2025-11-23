@@ -26,9 +26,9 @@ func Migrate(db *gorm.DB) error {
 	err := db.AutoMigrate(
 		&models.User{},
 		&models.Motorcycle{},
-		&models.Route{},         // NEW: Personal routes
-		&models.RouteWaypoint{}, // NEW: Route waypoints
-		&models.SavedRoute{},    // NEW: Route bookmarks
+		&models.Route{},
+		&models.RouteWaypoint{},
+		&models.SavedRoute{},
 		&models.CommunityEvent{},
 		&models.EventParticipant{},
 		&models.Post{},
@@ -38,10 +38,11 @@ func Migrate(db *gorm.DB) error {
 		&models.RideRecord{},
 		&models.RoutePoint{},
 		&models.UserLocation{},
+		&models.LocationVisibilitySettings{},      // ← ÚJ
+		&models.LocationVisibilityAllowed{},       // ← ÚJ
 		&models.TripCalculation{},
 		&models.Notification{},
 		&models.Comment{},
-		// Shared Route models
 		&models.SharedRoute{},
 		&models.SharedRouteLike{},
 		&models.SharedRouteBookmark{},
@@ -67,6 +68,35 @@ func Migrate(db *gorm.DB) error {
 func addCustomIndexes(db *gorm.DB) error {
 	// Add composite indexes for better query performance
 
+	// User locations indexes
+db.Exec("CREATE INDEX IF NOT EXISTS idx_user_locations_user_id ON user_locations(user_id)")
+db.Exec("CREATE INDEX IF NOT EXISTS idx_user_locations_online ON user_locations(is_online)")
+db.Exec("CREATE INDEX IF NOT EXISTS idx_user_locations_updated ON user_locations(updated_at DESC)")
+// Friend request indexes
+if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_friend_requests_sender ON friend_requests(sender_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not create index for friend_requests sender: %v\n", err)
+}
+
+if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver ON friend_requests(receiver_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not create index for friend_requests receiver: %v\n", err)
+}
+
+if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_friend_requests_status ON friend_requests(status)").Error; err != nil {
+	fmt.Printf("Warning: Could not create index for friend_requests status: %v\n", err)
+}
+
+// Friendship indexes
+if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_friendships_user1 ON friendships(user1_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not create index for friendships user1: %v\n", err)
+}
+
+if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_friendships_user2 ON friendships(user2_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not create index for friendships user2: %v\n", err)
+}
+// Location visibility indexes
+db.Exec("CREATE INDEX IF NOT EXISTS idx_location_visibility_settings_user ON location_visibility_settings(user_id)")
+db.Exec("CREATE INDEX IF NOT EXISTS idx_location_visibility_allowed_owner ON location_visibility_allowed(owner_user_id)")
+db.Exec("CREATE INDEX IF NOT EXISTS idx_location_visibility_composite ON location_visibility_allowed(owner_user_id, allowed_user_id)")
 	// NEW: Personal Routes indexes
 	if err := db.Exec("CREATE INDEX IF NOT EXISTS idx_routes_user_created ON routes(user_id, created_at DESC)").Error; err != nil {
 		fmt.Printf("Warning: Could not create index for routes: %v\n", err)
@@ -173,6 +203,25 @@ func addCustomIndexes(db *gorm.DB) error {
 func addDatabaseConstraints(db *gorm.DB) error {
 	// Add unique constraints to prevent duplicate likes/bookmarks/follows
 
+	// Prevent duplicate friend requests
+if err := db.Exec("ALTER TABLE friend_requests ADD CONSTRAINT uk_friend_requests_sender_receiver UNIQUE (sender_id, receiver_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not add unique constraint for friend_requests: %v\n", err)
+}
+
+// Prevent self friend requests
+if err := db.Exec("ALTER TABLE friend_requests ADD CONSTRAINT ck_friend_requests_no_self CHECK (sender_id != receiver_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not add check constraint for friend_requests: %v\n", err)
+}
+
+// Prevent duplicate friendships
+if err := db.Exec("ALTER TABLE friendships ADD CONSTRAINT uk_friendships_users UNIQUE (user1_id, user2_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not add unique constraint for friendships: %v\n", err)
+}
+
+// Ensure user1_id < user2_id in friendships
+if err := db.Exec("ALTER TABLE friendships ADD CONSTRAINT ck_friendships_order CHECK (user1_id < user2_id)").Error; err != nil {
+	fmt.Printf("Warning: Could not add check constraint for friendships order: %v\n", err)
+}
 	// Prevent duplicate post likes
 	if err := db.Exec("ALTER TABLE post_likes ADD CONSTRAINT uk_post_likes_post_user UNIQUE (post_id, user_id)").Error; err != nil {
 		fmt.Printf("Warning: Could not add unique constraint for post_likes: %v\n", err)
